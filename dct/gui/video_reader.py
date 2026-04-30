@@ -81,6 +81,9 @@ class VideoReader:
 
             ret, frame = self._cap.read()
             if ret:
+                # Конвертируем BGR→RGB здесь, в фоновом потоке.
+                # Qt-поток получит уже готовый RGB и только создаст QImage.
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 self._cur_idx = target
                 with self._lock:
-                    self._latest = frame
+                    self._latest = rgb

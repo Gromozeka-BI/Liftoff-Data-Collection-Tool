@@ -1,6 +1,7 @@
 """Five real-time stick graphs: T / Y / P / R + combined, last 10 seconds."""
 from __future__ import annotations
 
+import time
 from collections import deque
 from typing import Any
 
@@ -31,6 +32,7 @@ class StickGraphsWidget(QWidget):
         self._buf: dict[str, deque[float]] = {f: deque(maxlen=_MAXPTS) for _, f, _ in _CHANNELS}
         self._curves: dict[str, pg.PlotDataItem] = {}
         self._combined: dict[str, pg.PlotDataItem] = {}
+        self._last_redraw = 0.0   # throttle: рисуем не чаще 20fps
 
         # Individual channel plots
         for label, field, color in _CHANNELS:
@@ -53,12 +55,17 @@ class StickGraphsWidget(QWidget):
             self._ts.append(frame["ts_wall"])
             for _, field, _ in _CHANNELS:
                 self._buf[field].append(frame.get(field, 0.0))
-        self._redraw()
+        # Throttle: перерисовываем не чаще 20fps (50ms), чтобы не перегружать Qt-поток
+        now = time.monotonic()
+        if now - self._last_redraw >= 0.050:
+            self._redraw()
+            self._last_redraw = now
 
     def clear(self) -> None:
         self._ts.clear()
         for buf in self._buf.values():
             buf.clear()
+        self._last_redraw = 0.0
         self._redraw()
 
     # ── internal ───────────────────────────────────────────────────────────

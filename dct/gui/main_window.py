@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         self._live.telemetry_batch.connect(self._graphs.update_batch)
         self._live.event_fired.connect(self._on_event)
         self._live.stats_updated.connect(self._rec_bar.status.update_stats)
-        self._live.video_frame.connect(self._video.update_frame)
+        self._live.video_frame.connect(self._on_live_video_frame)
         self._live.session_started.connect(self._on_session_started)
         self._live.session_stopped.connect(self._on_session_stopped)
 
@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
         self._replay.event_fired.connect(self._on_event)
-        self._replay.video_frame.connect(self._video.update_frame)
+        self._replay.video_frame.connect(self._on_replay_video_frame)
         self._replay.progress_updated.connect(self._rep_bar.update_progress)
         self._replay.finished.connect(lambda: self._rep_bar.set_playing(False))
         self._map.clear_trail()
@@ -311,6 +311,18 @@ class MainWindow(QMainWindow):
                 f"Stats: {val.stats}\n\n{issues}",
             )
         self._live = None
+
+    # ── video frames ───────────────────────────────────────────────────────
+
+    @pyqtSlot(object)
+    def _on_live_video_frame(self, frame) -> None:
+        # ScreenRecorder даёт BGR
+        self._video.update_frame(frame, is_rgb=False)
+
+    @pyqtSlot(object)
+    def _on_replay_video_frame(self, frame) -> None:
+        # VideoReader уже конвертировал в RGB в фоновом потоке
+        self._video.update_frame(frame, is_rgb=True)
 
     # ── misc ───────────────────────────────────────────────────────────────
 

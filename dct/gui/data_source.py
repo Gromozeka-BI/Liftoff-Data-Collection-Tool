@@ -267,6 +267,9 @@ class ReplayDataSource(QObject):
         self._rows: list[dict] = pq.read_table(p / "telemetry.parquet").to_pylist()
         ev_path = p / "events.parquet"
         self._events: list[dict] = pq.read_table(ev_path).to_pylist() if ev_path.exists() else []
+        # Кэшируем массив ts_wall — seek() вызывается часто при скраббинге
+        self._ts_arr = np.array([r["ts_wall"] for r in self._rows]) if self._rows else np.array([])
+        self._ev_ts_arr = np.array([e["ts_wall"] for e in self._events]) if self._events else np.array([])
         self._idx = 0
         self._ev_idx = 0
         self._speed = 1.0
@@ -284,7 +287,7 @@ class ReplayDataSource(QObject):
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(16)
+        self._timer.start(33)  # 33ms = ~30fps; 16ms было избыточно и перегружало main thread
 
     @property
     def total_duration(self) -> float:
@@ -314,13 +317,12 @@ class ReplayDataSource(QObject):
     def seek(self, fraction: float) -> None:
         if not self._rows:
             return
-        t0, t1 = self._rows[0]["ts_wall"], self._rows[-1]["ts_wall"]
+        t0, t1 = self._ts_arr[0], self._ts_arr[-1]
         target = t0 + max(0.0, min(1.0, fraction)) * (t1 - t0)
-        ts_arr = np.array([r["ts_wall"] for r in self._rows])
-        self._idx = int(np.searchsorted(ts_arr, target))
+        # Используем кэшированные массивы — не пересоздаём на каждое движение скраббера
+        self._idx = int(np.searchsorted(self._ts_arr, target))
         self._idx = max(0, min(self._idx, len(self._rows) - 1))
-        ev_ts = np.array([e["ts_wall"] for e in self._events])
-        self._ev_idx = int(np.searchsorted(ev_ts, target)) if len(ev_ts) else 0
+        self._ev_idx = int(np.searchsorted(self._ev_ts_arr, target)) if len(self._ev_ts_arr) else 0
         self._sim_anchor  = target
         self._wall_anchor = time.monotonic()
         if self._idx < len(self._rows):
@@ -331,9 +333,14 @@ class ReplayDataSource(QObject):
             return
         target = self._sim_anchor + (time.monotonic() - self._wall_anchor) * self._speed
         batch: list[dict] = []
-        while self._idx < len(self._rows) and self._rows[self._idx]["ts_wall"] <= target:
+        # Не берём больше ~50 кадров за тик (0.5s при 100Hz).
+        # Если отстали сильнее — просто пропустим данные, но UI не зависнет.
+        while self._idx < len(self._rows) and self._rows[self._idx]["ts_wall"] <= target and len(batch) < 50:
             batch.append(self._rows[self._idx])
             self._idx += 1
+        # Если сильно отстали — перепрыгиваем вперёд, чтобы не накапливать долг
+        if self._idx < len(self._rows) and self._rows[self._idx]["ts_wall"] < target - 0.5:
+            self._idx = int(np.searchsorted(self._ts_arr, target - 0.1))
         if batch:
             self.telemetry_batch.emit(batch)
             self.telemetry_updated.emit(batch[-1])

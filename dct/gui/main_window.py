@@ -321,6 +321,7 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     def closeEvent(self, event) -> None:
+        self._rec_bar.cleanup()  # снимаем global keyboard hooks
         if self._live:
             self._live.stop_session()
         event.accept()

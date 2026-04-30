@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dct.gui import theme
+from dct.gui.global_hotkeys import GlobalHotkeyManager
 from dct.gui.widgets.status_panel import StatusPanel
 
 _PROFILES_DIR = Path("profiles")
@@ -108,7 +109,7 @@ class RecordBar(QWidget):
         self._btn_gate.clicked.connect(self.gate_requested)
         self._btn_sf.clicked.connect(self.sf_requested)
 
-        # Горячие клавиши 6-0 — ApplicationShortcut работает независимо от фокуса
+        # Qt-шорткаты (резервные, работают когда DCT в фокусе)
         self._shortcuts = []
         for key, slot in [("6", self._on_start), ("7", self.stop_requested),
                           ("8", self.lap_requested), ("9", self.gate_requested),
@@ -117,6 +118,13 @@ class RecordBar(QWidget):
             sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
             sc.activated.connect(slot)
             self._shortcuts.append(sc)
+
+        # Глобальные хоткеи через keyboard lib (работают из симулятора)
+        self._hotkeys = GlobalHotkeyManager()
+        for key, slot in [("6", self._on_start), ("7", self._stop_safe),
+                          ("8", self._lap_safe), ("9", self._gate_safe),
+                          ("0", self._sf_safe)]:
+            self._hotkeys.register(key, slot)
 
         self._set_buttons_recording(False)
         self.reload_profiles()
@@ -137,6 +145,27 @@ class RecordBar(QWidget):
         for combo in (self._combo_pilot, self._combo_drone,
                       self._combo_rate, self._combo_camera, self._combo_track):
             combo.setEnabled(not active)
+
+    def cleanup(self) -> None:
+        """Снимает глобальные хоткеи — вызывать при закрытии окна."""
+        self._hotkeys.unregister_all()
+
+    # Обёртки для глобальных хоткеев: фильтруем лишние события
+    def _stop_safe(self) -> None:
+        if self._recording:
+            self.stop_requested.emit()
+
+    def _lap_safe(self) -> None:
+        if self._recording:
+            self.lap_requested.emit()
+
+    def _gate_safe(self) -> None:
+        if self._recording:
+            self.gate_requested.emit()
+
+    def _sf_safe(self) -> None:
+        if self._recording:
+            self.sf_requested.emit()
 
     # ── internal ───────────────────────────────────────────────────────────
 

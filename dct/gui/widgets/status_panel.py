@@ -70,12 +70,14 @@ class StatusPanel(QWidget):
         grid.addWidget(QLabel("Pos"),  4, 2)
         self._lbl_pos  = _lbl("—",    "pos");     grid.addWidget(self._lbl_pos,  4, 3)
 
-        # Dim all static labels
+        # Подписи-заголовки: dim + тот же тултип, что и у соответствующего значения
+        _static_key = {"Pkts": "packets", "Hz": "hz", "Laps": "laps", "Drop": "dropped",
+                       "Spd": "speed", "Alt": "alt", "Bat": "bat", "Pos": "pos"}
         for i in range(grid.count()):
             w = grid.itemAt(i).widget()
-            if isinstance(w, QLabel) and w.text() in ("Pkts","Hz","Laps","Drop","Spd","Alt","Bat","Pos"):
+            if isinstance(w, QLabel) and w.text() in _static_key:
                 w.setStyleSheet(f"color: {theme.DIM}; font-size: 11px;")
-                w.setToolTip(_TOOLTIPS.get(w.text().lower(), ""))
+                w.setToolTip(_TOOLTIPS.get(_static_key[w.text()], ""))
 
     # ── public API ─────────────────────────────────────────────────────────
 

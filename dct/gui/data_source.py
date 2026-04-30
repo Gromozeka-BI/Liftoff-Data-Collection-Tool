@@ -12,11 +12,11 @@ from pathlib import Path
 from queue import Empty
 from typing import Any
 
-import cv2
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from dct.config import settings
+from dct.gui.video_reader import VideoReader
 from dct.log import get_logger
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
@@ -148,7 +148,6 @@ class LiveDataSource(QObject):
         self._stats = {"packets": 0, "laps": 0, "dropped": 0, "duration": 0.0,
                        "hz": 0.0, "frames": 0}
         self._start_time = time.time()
-        self._video_tick = 0  # счётчик для прореживания видеокадров
         self._timer.start(33)
         _log.info("Session started: %s", self._session_dir)
         self.session_started.emit(str(self._session_dir))
@@ -244,9 +243,9 @@ class LiveDataSource(QObject):
         self._stats["hz"] = round(self._stats["packets"] / dur, 1) if dur > 0 else 0.0
         if self._recorder:
             self._stats["frames"] = self._recorder.frames_written
-            # Отправляем видеокадр каждые 3 тика (≈10 fps), чтобы не перегружать GUI
-            self._video_tick += 1
-            if self._video_tick % 3 == 0 and self._recorder.latest_frame_bgr is not None:
+            # 30fps: ScreenRecorder захватывает в своём потоке с 30fps,
+            # передаём последний готовый кадр на каждый тик GUI (тоже ~30fps)
+            if self._recorder.latest_frame_bgr is not None:
                 self.video_frame.emit(self._recorder.latest_frame_bgr)
         self.stats_updated.emit(dict(self._stats))
 
@@ -275,16 +274,13 @@ class ReplayDataSource(QObject):
         self._wall_anchor = 0.0
         self._sim_anchor = 0.0
 
-        # Видео: открываем cv2.VideoCapture и загружаем временны́е метки кадров
-        self._video: cv2.VideoCapture | None = None
-        self._vid_ts: np.ndarray = np.array([])
-        self._vid_frame_idx = -1  # последний показанный кадр (не читаем повторно)
+        # Видео: запускаем фоновый VideoReader (cv2 НЕ в Qt-потоке)
+        self._video_reader: VideoReader | None = None
         vid_path = p / "video.mp4"
-        if vid_path.exists():
-            self._video = cv2.VideoCapture(str(vid_path))
         vid_ts_path = p / "video_timestamps.parquet"
-        if vid_ts_path.exists():
-            self._vid_ts = np.array(pq.read_table(vid_ts_path)["ts_wall"].to_pylist())
+        if vid_path.exists() and vid_ts_path.exists():
+            vid_ts = np.array(pq.read_table(vid_ts_path)["ts_wall"].to_pylist())
+            self._video_reader = VideoReader(vid_path, vid_ts)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -357,24 +353,16 @@ class ReplayDataSource(QObject):
         self.progress_updated.emit(current, self.total_duration)
 
     def _emit_video_frame(self, ts_wall: float) -> None:
-        """Находит ближайший видеокадр по ts_wall и эмитирует его."""
-        if self._video is None or len(self._vid_ts) == 0:
+        """Запрашивает кадр у фонового VideoReader (не блокирует)."""
+        if self._video_reader is None:
             return
-        frame_idx = int(np.searchsorted(self._vid_ts, ts_wall, side="left"))
-        frame_idx = max(0, min(frame_idx, len(self._vid_ts) - 1))
-        if frame_idx == self._vid_frame_idx:
-            return  # кадр не изменился — не читаем повторно
-        # Если прыгнули далеко (seek или 2x speed) — явно seek, иначе читаем последовательно
-        cur_pos = int(self._video.get(cv2.CAP_PROP_POS_FRAMES))
-        if abs(cur_pos - frame_idx) > 3:
-            self._video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = self._video.read()
-        if ret:
-            self._vid_frame_idx = frame_idx
+        self._video_reader.set_target_ts(ts_wall)
+        frame = self._video_reader.get_latest()
+        if frame is not None:
             self.video_frame.emit(frame)
 
     def deleteLater(self) -> None:
-        if self._video is not None:
-            self._video.release()
-            self._video = None
+        if self._video_reader is not None:
+            self._video_reader.stop()
+            self._video_reader = None
         super().deleteLater()

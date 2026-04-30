@@ -22,8 +22,8 @@ from collections import deque
 from typing import Any
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QColor, QPainterPath, QBrush, QPen, QFont
+from PyQt6.QtCore import Qt, QPointF, QRectF
+from PyQt6.QtGui import QColor, QPainterPath, QBrush, QPen, QFont, QTransform
 
 from dct.gui import theme
 
@@ -36,84 +36,60 @@ _BADGE_HIGH = ("#dae8fc", "#6c8ebf")   # верхний этаж
 
 
 class BadgeItem(pg.GraphicsObject):
-    """Бейдж с номером: квадрат масштабируется вместе с картой."""
-    
-    def __init__(self, num: str, fill: str, border: str, size_meters: float = 0.4, view_box=None):
+    """
+    Бейдж с номером ворот.
+    Квадрат и текст внутри масштабируются вместе с картой:
+    размер шрифта вычисляется из текущего worldTransform прямо в paint().
+    """
+
+    def __init__(self, num: str, fill: str, border: str, size_meters: float = 0.4):
         super().__init__()
-        self.num = str(num)
-        self.fill = fill
-        self.border = border
-        self.size_meters = size_meters
-        self.rx = size_meters * 0.2  # радиус скругления (20% от размера)
-        self.view_box = view_box
-        
-        self._create_graphics()
-    
-    def _create_graphics(self):
-        """Создаёт графическое представление бейджа."""
-        # Создаём путь для скруглённого прямоугольника
-        rect = QRectF(-self.size_meters/2, -self.size_meters/2, 
-                      self.size_meters, self.size_meters)
-        
-        path = QPainterPath()
-        path.addRoundedRect(rect, self.rx, self.rx)
-        
-        # Сохраняем путь для отрисовки
-        self.path = path
-        
-        # Настройки пера и кисти
-        self.brush = QBrush(QColor(self.fill))
-        self.pen = QPen(QColor(self.border))
-        self.pen.setWidthF(max(0.02, self.size_meters * 0.05))  # толщина границы
-    
+        self.num          = str(num)
+        self.size_meters  = size_meters
+        self._half        = size_meters / 2
+        self._rect        = QRectF(-self._half, -self._half, size_meters, size_meters)
+
+        self._path = QPainterPath()
+        self._path.addRoundedRect(self._rect, size_meters * 0.2, size_meters * 0.2)
+
+        self._brush = QBrush(QColor(fill))
+        self._pen   = QPen(QColor(border))
+        self._pen.setWidthF(size_meters * 0.06)   # толщина рамки масштабируется
+
     def boundingRect(self):
-        return QRectF(-self.size_meters/2, -self.size_meters/2, 
-                      self.size_meters, self.size_meters)
-    
+        return self._rect
+
     def paint(self, p, *args):
-        """Рисуем только скруглённый прямоугольник (без текста)."""
-        # Рисуем прямоугольник
-        p.setBrush(self.brush)
-        p.setPen(self.pen)
-        p.drawPath(self.path)
-        
-        # Текст временно отключён
-        # if self.view_box:
-        #     # Получаем текущий размер квадрата на экране
-        #     view_rect = self.view_box.viewRect()
-        #     if view_rect:
-        #         # Вычисляем размер квадрата в пикселях
-        #         x_range = view_rect.width()
-        #         y_range = view_rect.height()
-        #         
-        #         # Получаем размер виджета
-        #         widget_size = self.view_box.size()
-        #         
-        #         if widget_size.width() > 0 and widget_size.height() > 0:
-        #             # Приблизительный размер квадрата в пикселях
-        #             pixel_size_x = (self.size_meters / x_range) * widget_size.width()
-        #             pixel_size_y = (self.size_meters / y_range) * widget_size.height()
-        #             pixel_size = min(pixel_size_x, pixel_size_y)
-        #             
-        #             # Рисуем текст только если квадрат достаточно большой
-        #             if pixel_size >= 20:
-        #                 # Адаптируем размер шрифта под размер квадрата
-        #                 font = QFont("Arial")
-        #                 font.setBold(True)
-        #                 font_size = max(8, int(pixel_size * 0.6))
-        #                 font.setPixelSize(font_size)
-        #                 
-        #                 p.setFont(font)
-        #                 p.setPen(QColor(0, 0, 0))
-        #                 
-        #                 # Получаем размер текста
-        #                 text_rect = p.fontMetrics().boundingRect(self.num)
-        #                 
-        #                 # Центрируем текст в квадрате
-        #                 text_x = -text_rect.width() / 2
-        #                 text_y = text_rect.height() / 4
-        #                 
-        #                 p.drawText(int(text_x), int(text_y), self.num)
+        # Рисуем скруглённый прямоугольник в координатах данных (масштабируется)
+        p.setBrush(self._brush)
+        p.setPen(self._pen)
+        p.drawPath(self._path)
+
+        # Получаем трансформацию local → viewport ДО сброса
+        t  = p.transform()
+        tl = t.map(QPointF(-self._half, -self._half))
+        br = t.map(QPointF( self._half,  self._half))
+
+        screen_w   = abs(br.x() - tl.x())
+        screen_h   = abs(br.y() - tl.y())
+        pixel_size = min(screen_w, screen_h)
+        if pixel_size < 6:
+            return   # слишком мелко — текст не рисуем
+
+        cx = (tl.x() + br.x()) / 2
+        cy = (tl.y() + br.y()) / 2
+
+        # Сбрасываем трансформацию — рисуем текст в экранных пикселях
+        p.save()
+        p.setWorldTransform(QTransform())
+        font = QFont("Arial")
+        font.setBold(True)
+        font.setPixelSize(max(6, int(pixel_size * 0.60)))
+        p.setFont(font)
+        p.setPen(QColor(0, 0, 0))
+        screen_rect = QRectF(cx - screen_w / 2, cy - screen_h / 2, screen_w, screen_h)
+        p.drawText(screen_rect, Qt.AlignmentFlag.AlignCenter, self.num)
+        p.restore()
 
 
 class TrackMapWidget(pg.PlotWidget):
@@ -376,8 +352,7 @@ class TrackMapWidget(pg.PlotWidget):
         bx = gx - fx * (depth / 2 + size + extra) + lx * (hw + size/2)
         bz = gz - fz * (depth / 2 + size + extra) + lz * (hw + size/2)
 
-        # Создаём бейдж (только квадрат, без текста)
-        badge = BadgeItem(num, fill, border, size, self.getViewBox())
+        badge = BadgeItem(num, fill, border, size)
         self.addItem(badge)
         badge.setPos(bx, bz)
         self._gate_items.append(badge)

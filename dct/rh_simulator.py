@@ -19,6 +19,10 @@ import urllib.request
 import urllib.parse
 import json
 
+from dct.log import get_logger
+
+_log = get_logger("rh_sim")
+
 
 def _distance(px: float, py: float, pz: float, gate: dict[str, Any]) -> float:
     gx, gy, gz = gate["position"]
@@ -30,8 +34,8 @@ def _post(url: str, payload: dict[str, Any]) -> None:
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
         urllib.request.urlopen(req, timeout=1)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("POST %s failed: %s", url, e)
 
 
 class RHSimulator:
@@ -56,9 +60,11 @@ class RHSimulator:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        _log.info("RH simulator started: %d gates, radius=%.2f", len(self._gates), self._radius)
 
     def stop(self) -> None:
         self._running = False
+        _log.info("RH simulator stopped: %d laps detected", self.lap_count)
 
     def _loop(self) -> None:
         while self._running:
@@ -89,6 +95,8 @@ class RHSimulator:
     def _fire(self, gate_id: int, ts: float) -> None:
         if gate_id == self._sf_id:
             self.lap_count += 1
+            _log.info("Lap %d fired (gate %d)", self.lap_count, gate_id)
             _post(f"{self._api}/api/v1/rh/lap", {"gate_id": gate_id, "ts_wall": ts})
         else:
+            _log.debug("Gate %d crossed", gate_id)
             _post(f"{self._api}/api/v1/rh/gate", {"gate_id": gate_id, "ts_wall": ts})

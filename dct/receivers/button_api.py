@@ -10,6 +10,10 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from dct.log import get_logger
+
+_log = get_logger("button_api")
+
 
 class LapEvent(BaseModel):
     pilot: str | None = None
@@ -67,6 +71,7 @@ class ButtonAPI:
     def _push(self, event_type: str, gate_id: int | None, ts: float | None) -> None:
         if event_type.endswith("lap"):
             self.lap_count += 1
+        _log.debug("event: type=%s gate_id=%s lap_count=%d", event_type, gate_id, self.lap_count)
         self.events.put({
             "event_type": event_type,
             "gate_id": gate_id,
@@ -75,6 +80,7 @@ class ButtonAPI:
         })
 
     def start(self) -> None:
+        _log.info("ButtonAPI starting on %s:%s", self._host, self._port)
         cfg = uvicorn.Config(
             self._app,
             host=self._host,
@@ -87,5 +93,6 @@ class ButtonAPI:
         self._thread.start()
 
     def stop(self) -> None:
+        _log.info("ButtonAPI stopping")
         if self._server:
             self._server.should_exit = True

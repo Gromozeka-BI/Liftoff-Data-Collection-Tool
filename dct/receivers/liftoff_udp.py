@@ -20,6 +20,10 @@ import time
 from queue import Queue, Full
 from typing import Any
 
+from dct.log import get_logger
+
+_log = get_logger("udp")
+
 
 _HEADER_FMT = "<f fff ffff fff fff ffff"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)  # 80 B without battery/motors
@@ -83,10 +87,13 @@ class LiftoffUDPReceiver:
         self._running = True
         self._thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._thread.start()
+        _log.info("UDP receiver started on %s:%s", self._host, self._port)
 
     def stop(self) -> None:
         self._running = False
         self._sock.close()
+        _log.info("UDP receiver stopped — received=%d dropped=%d failed=%d",
+                  self.received, self.dropped, self.failed)
 
     def _recv_loop(self) -> None:
         while self._running:
@@ -108,6 +115,8 @@ class LiftoffUDPReceiver:
                 self._queue.put_nowait(parsed)
             except Full:
                 self.dropped += 1
+                if self.dropped % 100 == 1:
+                    _log.warning("UDP queue full — total dropped=%d", self.dropped)
 
     @property
     def queue(self) -> Queue:

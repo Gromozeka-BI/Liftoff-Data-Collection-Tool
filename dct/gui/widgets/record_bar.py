@@ -93,11 +93,11 @@ class RecordBar(QWidget):
         btn_lay.addLayout(row1)
         btn_lay.addLayout(row2)
 
-        self._btn_start = self._make_btn("1  START", "btn_start", row1)
-        self._btn_stop  = self._make_btn("2  STOP",  "btn_stop",  row1)
-        self._btn_lap   = self._make_btn("3  LAP",   "",          row2)
-        self._btn_gate  = self._make_btn("4  GATE",  "",          row2)
-        self._btn_sf    = self._make_btn("5  S/F",   "",          row2)
+        self._btn_start = self._make_btn("6  START", "btn_start", row1)
+        self._btn_stop  = self._make_btn("7  STOP",  "btn_stop",  row1)
+        self._btn_lap   = self._make_btn("8  LAP",   "",          row2)
+        self._btn_gate  = self._make_btn("9  GATE",  "",          row2)
+        self._btn_sf    = self._make_btn("0  S/F",   "",          row2)
 
         root.addWidget(btn_box)
 
@@ -108,14 +108,15 @@ class RecordBar(QWidget):
         self._btn_gate.clicked.connect(self.gate_requested)
         self._btn_sf.clicked.connect(self.sf_requested)
 
-        # Keyboard shortcuts (window-level, work even when focus elsewhere)
-        self._shortcuts = [
-            QShortcut(QKeySequence("1"), self, self._on_start),
-            QShortcut(QKeySequence("2"), self, self.stop_requested),
-            QShortcut(QKeySequence("3"), self, self.lap_requested),
-            QShortcut(QKeySequence("4"), self, self.gate_requested),
-            QShortcut(QKeySequence("5"), self, self.sf_requested),
-        ]
+        # Горячие клавиши 6-0 — ApplicationShortcut работает независимо от фокуса
+        self._shortcuts = []
+        for key, slot in [("6", self._on_start), ("7", self.stop_requested),
+                          ("8", self.lap_requested), ("9", self.gate_requested),
+                          ("0", self.sf_requested)]:
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            sc.activated.connect(slot)
+            self._shortcuts.append(sc)
 
         self._set_buttons_recording(False)
         self.reload_profiles()

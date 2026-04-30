@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import (
 
 from dct.gui import theme
 from dct.gui.data_source import LiveDataSource, ReplayDataSource
+from dct.log import get_logger
+
+_log = get_logger("main_window")
 from dct.gui.widgets.track_map import TrackMapWidget
 from dct.gui.widgets.stick_graphs import StickGraphsWidget
 from dct.gui.widgets.video_preview import VideoPreviewWidget
@@ -117,12 +120,18 @@ class MainWindow(QMainWindow):
     # ── mode switching ─────────────────────────────────────────────────────
 
     def _switch_mode(self, mode: int) -> None:
-        if mode == _MODE_RECORD and self._live and self._live._recording if hasattr(self._live, '_recording') else False:
-            return  # don't switch while recording
+        # Запрет переключения во время записи
+        if mode == _MODE_REPLAY and self._live and getattr(self._live, '_recording', False):
+            return
         self._mode = mode
         self._btn_mode_rec.setChecked(mode == _MODE_RECORD)
         self._btn_mode_rep.setChecked(mode == _MODE_REPLAY)
         self._stack.setCurrentIndex(mode)
+        # Очищаем карту и графики при каждом переключении
+        self._map.clear_trail()
+        self._graphs.clear()
+        self._video.clear_frame()
+        self._lap_count = 0
         if mode == _MODE_REPLAY:
             self._rep_bar.reload_sessions()
 
@@ -156,12 +165,14 @@ class MainWindow(QMainWindow):
         self._live.telemetry_batch.connect(self._graphs.update_batch)
         self._live.event_fired.connect(self._on_event)
         self._live.stats_updated.connect(self._rec_bar.status.update_stats)
+        self._live.video_frame.connect(self._video.update_frame)
         self._live.session_started.connect(self._on_session_started)
         self._live.session_stopped.connect(self._on_session_stopped)
 
         try:
             self._live.start_session(cfg)
         except RuntimeError as e:
+            _log.error("Failed to start session: %s", e)
             QMessageBox.critical(self, "Start error", str(e))
             self._live = None
             return
@@ -221,6 +232,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_replay_session_selected(self, path: str) -> None:
+        _log.info("Replay session selected: %s", path)
         p = Path(path)
         track_file = p / "track.json"
         if track_file.exists():
@@ -237,6 +249,7 @@ class MainWindow(QMainWindow):
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
         self._replay.event_fired.connect(self._on_event)
+        self._replay.video_frame.connect(self._video.update_frame)
         self._replay.progress_updated.connect(self._rep_bar.update_progress)
         self._replay.finished.connect(lambda: self._rep_bar.set_playing(False))
         self._map.clear_trail()

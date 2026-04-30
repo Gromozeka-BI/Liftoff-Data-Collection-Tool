@@ -12,17 +12,64 @@ from pathlib import Path
 from queue import Empty
 from typing import Any
 
+import cv2
 import numpy as np
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from dct.config import settings
+from dct.log import get_logger
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
 from dct.rh_simulator import RHSimulator
 from dct.screen_recorder import ScreenRecorder
-from dct.session import create_session, finalize_meta, copy_track, load_track
+from dct.session import create_session, copy_track, load_track
 from dct.storage.writer import TelemetryWriter, EventsWriter
-from dct.validator import validate_session
+
+_log = get_logger("data_source")
+
+
+# ── Фоновый поток для остановки сессии ───────────────────────────────────────
+
+class _StopThread(QThread):
+    """Выполняет тяжёлые операции остановки (recorder.join, flush, validate) вне UI-потока."""
+    result_ready = pyqtSignal(dict)
+
+    def __init__(self, udp, rh_sim, recorder, api, tw, ew,
+                 session_dir, stats, start_time):
+        super().__init__()
+        self._udp = udp
+        self._rh_sim = rh_sim
+        self._recorder = recorder
+        self._api = api
+        self._tw = tw
+        self._ew = ew
+        self._session_dir = session_dir
+        self._stats = dict(stats)
+        self._start_time = start_time
+
+    def run(self) -> None:
+        from dct.session import finalize_meta
+        from dct.validator import validate_session
+
+        if self._udp:    self._udp.stop()
+        if self._rh_sim: self._rh_sim.stop()
+        if self._recorder:
+            self._recorder.stop()
+            self._stats["frames"] = self._recorder.frames_written
+        if self._api:    self._api.stop()
+        if self._tw:     self._tw.close()
+        if self._ew:
+            self._ew.write_event("session_stop", time.time(), source="dct")
+            self._ew.close()
+        if self._session_dir:
+            finalize_meta(self._session_dir, self._stats["packets"],
+                          self._stats["laps"], self._start_time)
+            result = validate_session(self._session_dir)
+            self.result_ready.emit({
+                "session_dir": str(self._session_dir),
+                "stats": self._stats,
+                "validation": result,
+            })
 
 
 # ── Live ──────────────────────────────────────────────────────────────────────
@@ -32,6 +79,7 @@ class LiveDataSource(QObject):
     telemetry_batch   = pyqtSignal(list)   # all frames since last tick
     event_fired       = pyqtSignal(dict)
     stats_updated     = pyqtSignal(dict)
+    video_frame       = pyqtSignal(object) # np.ndarray BGR
     session_started   = pyqtSignal(str)    # session dir path
     session_stopped   = pyqtSignal(dict)   # {session_dir, stats, validation}
 
@@ -46,6 +94,7 @@ class LiveDataSource(QObject):
         self._session_dir: Path | None = None
         self._start_time = 0.0
         self._stats: dict[str, Any] = {}
+        self._stop_thread: _StopThread | None = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
 
@@ -99,30 +148,36 @@ class LiveDataSource(QObject):
         self._stats = {"packets": 0, "laps": 0, "dropped": 0, "duration": 0.0,
                        "hz": 0.0, "frames": 0}
         self._start_time = time.time()
+        self._video_tick = 0  # счётчик для прореживания видеокадров
         self._timer.start(33)
+        _log.info("Session started: %s", self._session_dir)
         self.session_started.emit(str(self._session_dir))
 
     def stop_session(self) -> None:
+        """Немедленно останавливает тикер и запускает тяжёлые операции в фоне."""
         self._timer.stop()
-        if self._udp:    self._udp.stop()
-        if self._rh_sim: self._rh_sim.stop()
-        if self._recorder:
-            self._recorder.stop()
-            self._stats["frames"] = self._recorder.frames_written
-        if self._api:    self._api.stop()
-        if self._tw:     self._tw.close()
-        if self._ew:
-            self._ew.write_event("session_stop", time.time(), source="dct")
-            self._ew.close()
-        if self._session_dir:
-            finalize_meta(self._session_dir, self._stats["packets"],
-                          self._stats["laps"], self._start_time)
-            result = validate_session(self._session_dir)
-            self.session_stopped.emit({
-                "session_dir": str(self._session_dir),
-                "stats": dict(self._stats),
-                "validation": result,
-            })
+        self._stop_thread = _StopThread(
+            self._udp, self._rh_sim, self._recorder, self._api,
+            self._tw, self._ew, self._session_dir, self._stats, self._start_time,
+        )
+        self._stop_thread.result_ready.connect(self._on_stop_finished)
+        self._stop_thread.start()
+        # Сбрасываем ссылки — поток владеет объектами до завершения
+        self._udp = self._rh_sim = self._recorder = self._api = None
+        self._tw = self._ew = None
+
+    def _on_stop_finished(self, result: dict) -> None:
+        val = result.get("validation")
+        if val:
+            _log.info("Session stopped: %s | packets=%d laps=%d validation=%s",
+                      result.get("session_dir"), result["stats"].get("packets", 0),
+                      result["stats"].get("laps", 0),
+                      "PASSED" if val.passed else "FAILED")
+            if not val.passed:
+                for issue in val.issues:
+                    _log.warning("Validation issue: %s", issue)
+        self._session_dir = None
+        self.session_stopped.emit(result)
 
     def mark_lap(self) -> None:
         if self._api:
@@ -178,6 +233,9 @@ class LiveDataSource(QObject):
             )
             if "lap" in ev["event_type"]:
                 self._stats["laps"] += 1
+                _log.info("Lap %d recorded", self._stats["laps"])
+            else:
+                _log.debug("Event: %s gate=%s", ev["event_type"], ev.get("gate_id"))
             self.event_fired.emit(ev)
 
         dur = time.time() - self._start_time
@@ -186,6 +244,10 @@ class LiveDataSource(QObject):
         self._stats["hz"] = round(self._stats["packets"] / dur, 1) if dur > 0 else 0.0
         if self._recorder:
             self._stats["frames"] = self._recorder.frames_written
+            # Отправляем видеокадр каждые 3 тика (≈10 fps), чтобы не перегружать GUI
+            self._video_tick += 1
+            if self._video_tick % 3 == 0 and self._recorder.latest_frame_bgr is not None:
+                self.video_frame.emit(self._recorder.latest_frame_bgr)
         self.stats_updated.emit(dict(self._stats))
 
 
@@ -195,6 +257,7 @@ class ReplayDataSource(QObject):
     telemetry_updated = pyqtSignal(dict)
     telemetry_batch   = pyqtSignal(list)
     event_fired       = pyqtSignal(dict)
+    video_frame       = pyqtSignal(object)         # np.ndarray BGR
     progress_updated  = pyqtSignal(float, float)   # current_s, total_s
     finished          = pyqtSignal()
 
@@ -211,6 +274,18 @@ class ReplayDataSource(QObject):
         self._paused = True
         self._wall_anchor = 0.0
         self._sim_anchor = 0.0
+
+        # Видео: открываем cv2.VideoCapture и загружаем временны́е метки кадров
+        self._video: cv2.VideoCapture | None = None
+        self._vid_ts: np.ndarray = np.array([])
+        self._vid_frame_idx = -1  # последний показанный кадр (не читаем повторно)
+        vid_path = p / "video.mp4"
+        if vid_path.exists():
+            self._video = cv2.VideoCapture(str(vid_path))
+        vid_ts_path = p / "video_timestamps.parquet"
+        if vid_ts_path.exists():
+            self._vid_ts = np.array(pq.read_table(vid_ts_path)["ts_wall"].to_pylist())
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(16)
@@ -266,6 +341,7 @@ class ReplayDataSource(QObject):
         if batch:
             self.telemetry_batch.emit(batch)
             self.telemetry_updated.emit(batch[-1])
+            self._emit_video_frame(batch[-1]["ts_wall"])
 
         while self._ev_idx < len(self._events) and self._events[self._ev_idx]["ts_wall"] <= target:
             self.event_fired.emit(self._events[self._ev_idx])
@@ -279,3 +355,26 @@ class ReplayDataSource(QObject):
 
         current = self._rows[self._idx]["ts_wall"] - self._rows[0]["ts_wall"]
         self.progress_updated.emit(current, self.total_duration)
+
+    def _emit_video_frame(self, ts_wall: float) -> None:
+        """Находит ближайший видеокадр по ts_wall и эмитирует его."""
+        if self._video is None or len(self._vid_ts) == 0:
+            return
+        frame_idx = int(np.searchsorted(self._vid_ts, ts_wall, side="left"))
+        frame_idx = max(0, min(frame_idx, len(self._vid_ts) - 1))
+        if frame_idx == self._vid_frame_idx:
+            return  # кадр не изменился — не читаем повторно
+        # Если прыгнули далеко (seek или 2x speed) — явно seek, иначе читаем последовательно
+        cur_pos = int(self._video.get(cv2.CAP_PROP_POS_FRAMES))
+        if abs(cur_pos - frame_idx) > 3:
+            self._video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = self._video.read()
+        if ret:
+            self._vid_frame_idx = frame_idx
+            self.video_frame.emit(frame)
+
+    def deleteLater(self) -> None:
+        if self._video is not None:
+            self._video.release()
+            self._video = None
+        super().deleteLater()

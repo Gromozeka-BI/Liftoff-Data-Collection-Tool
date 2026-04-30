@@ -25,6 +25,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from dct.log import get_logger
+
+_log = get_logger("screen_recorder")
+
 
 _TIMESTAMPS_SCHEMA = pa.schema([
     pa.field("frame_idx", pa.int64()),
@@ -84,16 +88,24 @@ class ScreenRecorder:
         self.frames_written = 0
         self.actual_fps: float = float(fps)
         self._error: Exception | None = None
+        self.latest_frame_bgr: np.ndarray | None = None  # последний захваченный кадр для GUI
 
     def start(self) -> None:
         self._running = True
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
         self._thread.start()
+        _log.info("Screen recorder started: %dx%d@%dfps → %s",
+                  self._target_w, self._target_h, self._fps, self._output.name)
 
     def stop(self) -> None:
         self._running = False
         if self._thread:
             self._thread.join(timeout=30)
+        if self._error:
+            _log.error("Screen recorder error: %s", self._error)
+        else:
+            _log.info("Screen recorder stopped: %d frames @ %.1f fps",
+                      self.frames_written, self.actual_fps)
 
     def _record_loop(self) -> None:
         try:
@@ -117,6 +129,10 @@ class ScreenRecorder:
                     if t0 - region_cache_at > 5.0:
                         region_cache = _get_window_region(self._title)
                         region_cache_at = t0
+                        if region_cache is None:
+                            _log.debug("Window '%s' not found, capturing full screen", self._title)
+                        else:
+                            _log.debug("Window region: %s", region_cache)
                     monitor = region_cache if region_cache is not None else sct.monitors[1]
 
                     # Timestamp before grab() — closest to the game state in this frame.
@@ -128,6 +144,7 @@ class ScreenRecorder:
                         frame = cv2.resize(frame, (self._target_w, self._target_h))
 
                     writer.write(frame)
+                    self.latest_frame_bgr = frame
                     frame_timestamps.append(ts_wall)
                     self.frames_written += 1
 
@@ -146,6 +163,7 @@ class ScreenRecorder:
 
         except Exception as exc:
             self._error = exc
+            _log.exception("Screen recorder crashed: %s", exc)
 
     def _save_timestamps(self, timestamps: list[float]) -> None:
         table = pa.table(

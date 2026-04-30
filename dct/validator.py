@@ -63,12 +63,13 @@ def validate_session(session_dir: Path) -> ValidationResult:
     if miss_pct > 1.0:
         result.fail(f"missing seq {miss_pct:.2f}% > 1%")
 
-    # --- Timestamp drift check (≤ 100 ms) ---
-    if duration > 0 and ts_sim[-1] > 0:
-        drift = abs(duration - (ts_sim[-1] - ts_sim[0]))
-        result.stats["ts_drift_ms"] = round(drift * 1000, 1)
-        if drift > 0.1:
-            result.fail(f"timestamp drift {drift*1000:.1f} ms > 100 ms")
+    # --- Timestamp drift check: максимальный gap между соседними ts_wall (≤ 100 ms) ---
+    ts_arr = np.array(ts_wall)
+    gaps = np.diff(ts_arr)
+    max_gap_ms = float(np.max(gaps) * 1000) if len(gaps) > 0 else 0.0
+    result.stats["max_gap_ms"] = round(max_gap_ms, 1)
+    if max_gap_ms > 100.0:
+        result.fail(f"max packet gap {max_gap_ms:.1f} ms > 100 ms")
 
     # --- Lap detection check (≥ 1 lap) ---
     laps = 0

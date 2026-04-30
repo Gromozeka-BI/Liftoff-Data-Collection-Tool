@@ -14,6 +14,9 @@ from rich.live import Live
 from rich.table import Table
 
 from dct.config import settings
+from dct.log import setup_logging, get_logger
+
+_log = get_logger("record")
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
 from dct.screen_recorder import ScreenRecorder
@@ -59,6 +62,8 @@ def _build_status_table(stats: dict) -> Table:
 @click.option("--no-rh-sim", is_flag=True, default=False, help="Disable mock RH simulator")
 def record(pilot: str, drone: str, track: str, purpose: str, no_video: bool, no_rh_sim: bool):
     """Record a new telemetry session."""
+    setup_logging()
+    _log.info("dct record start: pilot=%s drone=%s track=%s purpose=%s", pilot, drone, track, purpose)
     # --- Resolve track ---
     track_path = _find_track(track)
     track_data: dict | None = None
@@ -207,4 +212,5 @@ def record(pilot: str, drone: str, track: str, purpose: str, no_video: bool, no_
             console.print(f"  [red]•[/red] {issue}")
         console.print(f"  Stats: {result.stats}")
 
+    _log.info("Session saved: %s | packets=%d laps=%d", session_dir, stats["packets"], stats["laps"])
     console.print(f"\n[bold green]Session saved:[/bold green] {session_dir}")

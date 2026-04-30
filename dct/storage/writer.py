@@ -10,6 +10,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from dct.storage.schema import TELEMETRY_SCHEMA, EVENTS_SCHEMA
+from dct.log import get_logger
+
+_log = get_logger("writer")
 
 
 class StreamingParquetWriter:
@@ -51,6 +54,7 @@ class StreamingParquetWriter:
                 self._schema,
                 compression="snappy",
             )
+            _log.debug("Opened parquet writer: %s", self._path)
 
     def write(self, row: dict[str, Any]) -> None:
         with self._lock:
@@ -74,10 +78,12 @@ class StreamingParquetWriter:
              for name, vals in arrays.items()},
             schema=self._schema,
         )
+        n = len(self._buf)
         self._writer.write_table(table)
-        self.total_rows += len(self._buf)
+        self.total_rows += n
         self._buf.clear()
         self._last_flush = time.monotonic()
+        _log.debug("Flushed %d rows to %s (total=%d)", n, self._path.name, self.total_rows)
 
     def flush(self) -> None:
         with self._lock:
@@ -89,6 +95,7 @@ class StreamingParquetWriter:
             if self._writer:
                 self._writer.close()
                 self._writer = None
+                _log.info("Closed parquet writer: %s (total_rows=%d)", self._path.name, self.total_rows)
 
 
 class TelemetryWriter(StreamingParquetWriter):

@@ -11,9 +11,11 @@ from PyQt6.QtWidgets import QApplication
 
 from dct.gui.main_window import MainWindow
 from dct.gui.theme import QSS
+from dct.log import setup_logging, get_logger
 
 
 def run() -> None:
+    setup_logging()
     pg.setConfigOptions(antialias=True, useOpenGL=False)
     app = QApplication(sys.argv)
     app.setApplicationName("DCT")

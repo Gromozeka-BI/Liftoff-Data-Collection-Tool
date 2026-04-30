@@ -1,4 +1,26 @@
 [
-  {"id": "pilot_a", "nickname": "A"},
-  {"id": "pilot_b", "nickname": "B"}
+  {
+    "id": "pilot_1",
+    "nickname": "Gromozeka"
+  },
+  {
+    "id": "pilot_2",
+    "nickname": "PlatOnAir"
+  },
+  {
+    "id": "pilot_3",
+    "nickname": "Salie1"
+  },
+  {
+    "id": "pilot_4",
+    "nickname": "RedSeep"
+  },
+  {
+    "id": "pilot_5",
+    "nickname": "Shturman"
+  },
+  {
+    "id": "pilot_6",
+    "nickname": "Suvorovetc"
+  }
 ]

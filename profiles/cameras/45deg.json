@@ -1,7 +1,0 @@
-{
-  "id": "45deg_90fov",
-  "name": "45 deg / 90 FOV",
-  "angle_deg": 45,
-  "fov_deg": 90,
-  "resolution": [1280, 720]
-}

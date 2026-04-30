@@ -1,0 +1,7 @@
+{
+  "id": "MadTrainer",
+  "name": "MadTrainer",
+  "motor_kv": 4600,
+  "weight_g": 160,
+  "prop": "Gemfan 3016"
+}

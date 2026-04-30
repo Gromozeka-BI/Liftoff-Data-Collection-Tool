@@ -160,6 +160,9 @@ class MainWindow(QMainWindow):
         else:
             self._current_track = None
 
+        import time as _time
+        self._graphs.set_time_zero(_time.time())  # ось X от 0 с начала записи
+
         self._live = LiveDataSource(self)
         self._live.telemetry_updated.connect(self._on_telemetry)
         self._live.telemetry_batch.connect(self._graphs.update_batch)
@@ -246,9 +249,13 @@ class MainWindow(QMainWindow):
         if not telem.exists():
             return
         self._replay = ReplayDataSource(p, self)
+        # t=0 на оси времени = первый пакет сессии
+        if self._replay.first_ts > 0:
+            self._graphs.set_time_zero(self._replay.first_ts)
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
         self._replay.event_fired.connect(self._on_event)
+        self._replay.stats_updated.connect(self._rep_bar.status.update_stats)
         self._replay.video_frame.connect(self._on_replay_video_frame)
         self._replay.progress_updated.connect(self._rep_bar.update_progress)
         self._replay.finished.connect(lambda: self._rep_bar.set_playing(False))

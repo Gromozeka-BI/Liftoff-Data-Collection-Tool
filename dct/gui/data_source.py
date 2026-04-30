@@ -257,6 +257,7 @@ class ReplayDataSource(QObject):
     telemetry_batch   = pyqtSignal(list)
     event_fired       = pyqtSignal(dict)
     video_frame       = pyqtSignal(object)         # np.ndarray BGR
+    stats_updated     = pyqtSignal(dict)           # зеркало LiveDataSource.stats_updated
     progress_updated  = pyqtSignal(float, float)   # current_s, total_s
     finished          = pyqtSignal()
 
@@ -270,6 +271,11 @@ class ReplayDataSource(QObject):
         # Кэшируем массив ts_wall — seek() вызывается часто при скраббинге
         self._ts_arr = np.array([r["ts_wall"] for r in self._rows]) if self._rows else np.array([])
         self._ev_ts_arr = np.array([e["ts_wall"] for e in self._events]) if self._events else np.array([])
+
+        # Предвычисляем количество lap-событий для быстрого поиска в _tick()
+        self._lap_event_mask = np.array(
+            ["lap" in e.get("event_type", "") for e in self._events], dtype=bool
+        ) if self._events else np.array([], dtype=bool)
         self._idx = 0
         self._ev_idx = 0
         self._speed = 1.0
@@ -294,6 +300,10 @@ class ReplayDataSource(QObject):
         if len(self._rows) < 2:
             return 0.0
         return self._rows[-1]["ts_wall"] - self._rows[0]["ts_wall"]
+
+    @property
+    def first_ts(self) -> float:
+        return self._rows[0]["ts_wall"] if self._rows else 0.0
 
     def play(self) -> None:
         if self._idx >= len(self._rows):
@@ -358,6 +368,21 @@ class ReplayDataSource(QObject):
 
         current = self._rows[self._idx]["ts_wall"] - self._rows[0]["ts_wall"]
         self.progress_updated.emit(current, self.total_duration)
+
+        # Статистика для StatusPanel — воспроизводим то, что было во время записи
+        laps_now = int(np.sum(self._lap_event_mask[:self._ev_idx])) if len(self._lap_event_mask) else 0
+        hz = round((self._ts_arr[1] - self._ts_arr[0]) ** -1, 1) if len(self._ts_arr) > 1 else 0.0
+        # hz берём как медианный интервал по всей сессии (стабильнее мгновенного)
+        if len(self._ts_arr) > 10:
+            median_dt = float(np.median(np.diff(self._ts_arr)))
+            hz = round(1.0 / median_dt, 1) if median_dt > 0 else 0.0
+        self.stats_updated.emit({
+            "packets":  self._idx,           # пакетов воспроизведено до текущей позиции
+            "hz":       hz,                  # реальная частота из записанных данных
+            "laps":     laps_now,            # кругов до текущей позиции
+            "dropped":  0,                   # при replay дропов нет
+            "duration": current,             # текущая позиция в секундах
+        })
 
     def _emit_video_frame(self, ts_wall: float) -> None:
         """Запрашивает кадр у фонового VideoReader (не блокирует)."""

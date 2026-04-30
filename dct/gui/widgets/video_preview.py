@@ -36,22 +36,24 @@ class VideoPreviewWidget(QLabel):
         try:
             dst_w = max(16, self.width())
             dst_h = max(16, self.height())
-
-            # Масштабируем до размера виджета ДО конвертации цвета:
-            # это уменьшает объём данных для следующих шагов в 4–10x.
             src_h, src_w = frame.shape[:2]
-            if src_w != dst_w or src_h != dst_h:
-                frame = cv2.resize(frame, (dst_w, dst_h), interpolation=cv2.INTER_LINEAR)
+
+            # Масштаб с сохранением aspect ratio (letterbox — без деформации)
+            scale = min(dst_w / src_w, dst_h / src_h)
+            new_w = max(1, int(src_w * scale))
+            new_h = max(1, int(src_h * scale))
+
+            if new_w != src_w or new_h != src_h:
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
             # BGR → RGB (только для live-кадров; VideoReader уже даёт RGB)
             if not is_rgb:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             h, w = frame.shape[:2]
-            # np.ascontiguousarray гарантирует непрерывность памяти для QImage
             data = np.ascontiguousarray(frame)
             qimg = QImage(data.data, w, h, w * 3, QImage.Format.Format_RGB888)
-            # fromImage делает внутреннюю копию, поэтому data может быть GC'd после
+            # fromImage делает внутреннюю копию данных — data может быть GC'd после
             self.setPixmap(QPixmap.fromImage(qimg))
         except Exception:
             pass

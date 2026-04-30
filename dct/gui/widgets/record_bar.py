@@ -14,7 +14,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QGroupBox, QHBoxLayout, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
 from dct.gui import theme
@@ -178,8 +178,16 @@ class RecordBar(QWidget):
         rate_data   = self._combo_rate.currentData()
         camera_data = self._combo_camera.currentData()
 
-        if not all([pilot_data, drone_data, track_data]):
-            return  # silently ignore incomplete config
+        missing = []
+        if not pilot_data:  missing.append("Pilot")
+        if not drone_data:  missing.append("Drone")
+        if not track_data:  missing.append("Track")
+        if missing:
+            QMessageBox.warning(
+                self, "Session config incomplete",
+                "Please select the following before starting:\n\n  • " + "\n  • ".join(missing),
+            )
+            return
 
         track_path = Path("tracks") / f"{track_data.get('id', track_data['name'])}.json"
         if not track_path.exists():

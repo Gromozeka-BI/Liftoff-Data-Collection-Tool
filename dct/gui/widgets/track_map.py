@@ -1,4 +1,4 @@
-"""2-D top-down track map: gates as rectangles, drone arrow, 3-second trail."""
+"""2-D top-down track map: gates, start point, bounds, drone arrow, trail."""
 from __future__ import annotations
 
 import math
@@ -21,6 +21,8 @@ class TrackMapWidget(pg.PlotWidget):
         self._setup_plot()
         self._gate_items: list[pg.PlotDataItem] = []
         self._gate_label_items: list[pg.TextItem] = []
+        self._bounds_item: pg.PlotDataItem | None = None
+        self._start_item: pg.ScatterPlotItem | None = None
 
         # Trail
         self._trail_x: deque[float] = deque(maxlen=self.TRAIL_MAX)
@@ -62,6 +64,12 @@ class TrackMapWidget(pg.PlotWidget):
             self.removeItem(item)
         self._gate_items.clear()
         self._gate_label_items.clear()
+        if self._bounds_item:
+            self.removeItem(self._bounds_item)
+            self._bounds_item = None
+        if self._start_item:
+            self.removeItem(self._start_item)
+            self._start_item = None
 
         gates = track_data.get("gates", [])
         for gate in gates:
@@ -80,13 +88,54 @@ class TrackMapWidget(pg.PlotWidget):
             self.addItem(lbl)
             self._gate_label_items.append(lbl)
 
-        # Auto-fit view to track bounds
-        if gates:
-            xs_all = [g["position"][0] for g in gates]
-            zs_all = [g["position"][2] for g in gates]
-            pad = max(3.0, (max(xs_all) - min(xs_all)) * 0.15)
-            self.setXRange(min(xs_all) - pad, max(xs_all) + pad, padding=0)
-            self.setYRange(min(zs_all) - pad, max(zs_all) + pad, padding=0)
+        # Bounds rectangle (dashed)
+        bounds = track_data.get("bounds")
+        bx = bz = ox = oz = 0.0
+        if bounds:
+            bx = float(bounds.get("x", 0))
+            bz = float(bounds.get("y", bounds.get("z", 0)))
+            ox = float(bounds.get("origin_x", 0.0))
+            oz = float(bounds.get("origin_z", 0.0))
+            bxs = [ox, ox+bx, ox+bx, ox, ox]
+            bzs = [oz, oz, oz+bz, oz+bz, oz]
+            self._bounds_item = self.plot(
+                bxs, bzs,
+                pen=pg.mkPen(theme.BORDER, width=1, style=Qt.PenStyle.DashLine),
+            )
+
+        # Start point marker (star)
+        # Поддерживаем два формата: {"x":…, "z":…} и {"position": [x, y, z]}
+        sp = track_data.get("start_point")
+        sp_x: float | None = None
+        sp_z: float | None = None
+        if sp:
+            if "position" in sp:
+                sp_x, _, sp_z = sp["position"]
+            else:
+                sp_x = float(sp.get("x", 0))
+                sp_z = float(sp.get("z", sp.get("y", 0)))
+            self._start_item = pg.ScatterPlotItem(
+                [sp_x], [sp_z], symbol="star", size=18,
+                brush=pg.mkBrush(theme.GATE_SF), pen=pg.mkPen(None),
+            )
+            self.addItem(self._start_item)
+
+        # Auto-fit view: use explicit bounds if provided, else gate extents
+        fit_xs: list[float] = []
+        fit_zs: list[float] = []
+        if bounds and bx > 0 and bz > 0:
+            fit_xs = [ox, ox + bx]
+            fit_zs = [oz, oz + bz]
+        elif gates:
+            fit_xs = [g["position"][0] for g in gates]
+            fit_zs = [g["position"][2] for g in gates]
+        if sp_x is not None and sp_z is not None:
+            fit_xs.append(sp_x)
+            fit_zs.append(sp_z)
+        if fit_xs and fit_zs:
+            pad = max(2.0, (max(fit_xs) - min(fit_xs)) * 0.08)
+            self.setXRange(min(fit_xs) - pad, max(fit_xs) + pad, padding=0)
+            self.setYRange(min(fit_zs) - pad, max(fit_zs) + pad, padding=0)
         self._has_track = True
 
     def update_drone(self, frame: dict[str, Any]) -> None:

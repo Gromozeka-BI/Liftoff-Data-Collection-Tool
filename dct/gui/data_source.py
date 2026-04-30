@@ -48,6 +48,7 @@ class _StopThread(QThread):
         self._start_time = start_time
 
     def run(self) -> None:
+        import shutil
         from dct.session import finalize_meta
         from dct.validator import validate_session
 
@@ -65,6 +66,15 @@ class _StopThread(QThread):
             finalize_meta(self._session_dir, self._stats["packets"],
                           self._stats["laps"], self._start_time)
             result = validate_session(self._session_dir)
+
+            # Если пилот не прошёл ни одного гейта — удаляем сессию
+            if result.stats.get("gates_passed", 0) < 1:
+                _log.warning("No gates passed — deleting session %s", self._session_dir)
+                try:
+                    shutil.rmtree(self._session_dir)
+                except Exception as e:
+                    _log.error("Failed to delete session dir: %s", e)
+
             self.result_ready.emit({
                 "session_dir": str(self._session_dir),
                 "stats": self._stats,

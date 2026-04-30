@@ -79,6 +79,15 @@ class StatusPanel(QWidget):
                 w.setStyleSheet(f"color: {theme.DIM}; font-size: 11px;")
                 w.setToolTip(_TOOLTIPS.get(_static_key[w.text()], ""))
 
+        # Фиксируем минимальные ширины динамических меток — предотвращает скачки панели
+        for lbl in (self._lbl_pkts, self._lbl_hz, self._lbl_laps, self._lbl_drop):
+            lbl.setMinimumWidth(52)
+        self._lbl_spd.setMinimumWidth(70)
+        self._lbl_alt.setMinimumWidth(52)
+        self._lbl_bat.setMinimumWidth(52)
+        self._lbl_pos.setMinimumWidth(140)
+        self._lbl_dur.setMinimumWidth(60)
+
     # ── public API ─────────────────────────────────────────────────────────
 
     def set_recording(self, active: bool) -> None:

@@ -6,11 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
 )
+
+_LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
 
 from dct.gui import theme
 from dct.gui.data_source import LiveDataSource, ReplayDataSource
@@ -31,6 +33,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("DCT — Data Collection Toolkit")
+        if _LOGO_PATH.exists():
+            self.setWindowIcon(QIcon(str(_LOGO_PATH)))
         self.resize(1400, 860)
 
         self._mode = _MODE_RECORD
@@ -86,7 +90,7 @@ class MainWindow(QMainWindow):
         self._rep_bar = ReplayBar()
         self._stack.addWidget(self._rec_bar)   # index 0
         self._stack.addWidget(self._rep_bar)   # index 1
-        self._stack.setFixedHeight(130)
+        self._stack.setFixedHeight(145)
         vbox.addWidget(self._stack)
 
     def _build_mode_bar(self) -> QWidget:
@@ -96,6 +100,13 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(8, 0, 8, 0)
         lay.setSpacing(4)
+
+        # Logo
+        if _LOGO_PATH.exists():
+            logo_lbl = QLabel()
+            pix = QPixmap(str(_LOGO_PATH)).scaledToHeight(30, Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(pix)
+            lay.addWidget(logo_lbl)
 
         self._btn_mode_rec = QPushButton("● RECORD")
         self._btn_mode_rep = QPushButton("▶ REPLAY")
@@ -275,6 +286,9 @@ class MainWindow(QMainWindow):
     def _on_replay_seek(self, fraction: float) -> None:
         if self._replay:
             self._replay.seek(fraction)
+            # Очищаем след и графики — данные будут перестроены от новой позиции
+            self._map.clear_trail()
+            self._graphs.clear()
 
     @pyqtSlot(float)
     def _on_replay_speed(self, speed: float) -> None:

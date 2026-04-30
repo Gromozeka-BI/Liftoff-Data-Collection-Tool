@@ -71,14 +71,17 @@ def validate_session(session_dir: Path) -> ValidationResult:
     if max_gap_ms > 100.0:
         result.fail(f"max packet gap {max_gap_ms:.1f} ms > 100 ms")
 
-    # --- Lap detection check (≥ 1 lap) ---
+    # --- Gate/lap check: пилот должен пройти хотя бы один гейт ---
     laps = 0
+    gates_passed = 0
     if events_path.exists():
         ev_table = pq.read_table(events_path)
         types = ev_table.column("event_type").to_pylist()
         laps = sum(1 for t in types if "lap" in t)
+        gates_passed = sum(1 for t in types if "gate" in t)
     result.stats["laps_detected"] = laps
-    if laps < 1:
-        result.fail("no laps detected — check gate detection or RH events")
+    result.stats["gates_passed"] = gates_passed
+    if gates_passed < 1:
+        result.fail("no gates passed — session not saved (pilot must pass at least one gate)")
 
     return result

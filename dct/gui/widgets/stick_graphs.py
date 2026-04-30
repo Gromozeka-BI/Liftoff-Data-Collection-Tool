@@ -32,6 +32,7 @@ class StickGraphsWidget(QWidget):
         self._buf: dict[str, deque[float]] = {f: deque(maxlen=_MAXPTS) for _, f, _ in _CHANNELS}
         self._curves: dict[str, pg.PlotDataItem] = {}
         self._combined: dict[str, pg.PlotDataItem] = {}
+        self._plots: list[pg.PlotWidget] = []  # все PlotWidget для синхронного setXRange
         self._last_redraw = 0.0   # throttle: рисуем не чаще 20fps
         self._t_zero: float = 0.0  # ts_wall начала сессии; 0 = не задан
 
@@ -40,6 +41,7 @@ class StickGraphsWidget(QWidget):
             pw = self._make_plot(label, color, show_x=False)
             curve = pw.plot([], [], pen=pg.mkPen(color, width=1.5))
             self._curves[field] = curve
+            self._plots.append(pw)
             layout.addWidget(pw)
 
         # Совмещённый график (все 4 канала, ось X видна)
@@ -47,6 +49,7 @@ class StickGraphsWidget(QWidget):
         for label, field, color in _CHANNELS:
             c = pw_comb.plot([], [], pen=pg.mkPen(color, width=1.2))
             self._combined[field] = c
+        self._plots.append(pw_comb)
         layout.addWidget(pw_comb)
 
     # ── public ─────────────────────────────────────────────────────────────
@@ -72,6 +75,8 @@ class StickGraphsWidget(QWidget):
             buf.clear()
         self._last_redraw = 0.0
         self._t_zero = 0.0
+        for pw in self._plots:
+            pw.setXRange(0, _WINDOW, padding=0)
         self._redraw()
 
     # ── internal ───────────────────────────────────────────────────────────
@@ -90,8 +95,15 @@ class StickGraphsWidget(QWidget):
 
         # Скользящее окно: последние _WINDOW секунд
         t_now = t_abs[-1]
-        mask = t_abs >= (t_now - _WINDOW)
+        t_win_start = max(0.0, t_now - _WINDOW)
+        mask = t_abs >= t_win_start
         t_plot = t_abs[mask]  # всегда ≥ 0, растёт слева направо
+
+        # Синхронно обновляем X-диапазон на всех графиках (auto-range выключен)
+        x_lo = t_win_start
+        x_hi = max(t_now, _WINDOW)
+        for pw in self._plots:
+            pw.setXRange(x_lo, x_hi, padding=0)
 
         for _, field, _ in _CHANNELS:
             data = np.array(self._buf[field])[mask]
@@ -106,9 +118,11 @@ class StickGraphsWidget(QWidget):
         pw.setMaximumHeight(90)
         pw.showGrid(x=False, y=True, alpha=0.15)
 
-        # Фиксируем Y-диапазон и отключаем автомасштаб/мышиный зум
+        # Фиксируем Y-диапазон, блокируем автомасштаб и зум мышью
         pw.setYRange(-1.05, 1.05, padding=0)
         pw.enableAutoRange(axis="y", enable=False)
+        pw.enableAutoRange(axis="x", enable=False)  # без этого первый батч вызывает прыжок
+        pw.setXRange(0, 10, padding=0)
         pw.setMouseEnabled(x=False, y=False)
         pw.setMenuEnabled(False)
 

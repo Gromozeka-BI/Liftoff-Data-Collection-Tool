@@ -1,0 +1,8 @@
+{
+  "id": "default_bf",
+  "name": "Default BF",
+  "model": "betaflight",
+  "roll":  {"rc_rate": 0.50, "rate": 0.69, "expo": 0.00},
+  "pitch": {"rc_rate": 0.50, "rate": 0.69, "expo": 0.00},
+  "yaw":   {"rc_rate": 0.50, "rate": 0.69, "expo": 0.00}
+}

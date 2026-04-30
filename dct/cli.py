@@ -6,6 +6,7 @@ from dct.commands.list_cmd import list_cmd
 from dct.commands.replay import replay
 from dct.commands.validate import validate
 from dct.commands.align_cmd import align_cmd
+from dct.commands.monitor import monitor
 
 
 @click.group()
@@ -19,3 +20,4 @@ cli.add_command(list_cmd, name="list")
 cli.add_command(replay)
 cli.add_command(validate)
 cli.add_command(align_cmd, name="align")
+cli.add_command(monitor)

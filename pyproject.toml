@@ -19,6 +19,8 @@ dependencies = [
     "numpy>=1.26",
     "rich>=13.7",
     "pygetwindow>=0.0.9; sys_platform == 'win32'",
+    "PyQt6>=6.6",
+    "pyqtgraph>=0.13",
 ]
 
 [project.scripts]

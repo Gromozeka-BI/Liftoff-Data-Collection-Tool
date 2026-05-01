@@ -21,7 +21,7 @@ from dct.log import get_logger
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
 from dct.rh_simulator import RHSimulator
-from dct.screen_recorder import ScreenRecorder
+from dct.screen_recorder import ScreenRecorder, CaptureDeviceRecorder
 from dct.session import create_session, copy_track, load_track
 from dct.storage.writer import TelemetryWriter, EventsWriter
 
@@ -137,13 +137,23 @@ class LiveDataSource(QObject):
         self._api.start()
 
         if not cfg.get("no_video"):
-            self._recorder = ScreenRecorder(
-                self._session_dir / "video.mp4",
-                settings.screen_window_title,
-                fps=settings.screen_fps,
-                target_w=settings.screen_width,
-                target_h=settings.screen_height,
-            )
+            vsrc = cfg.get("video_source") or {"type": "screen"}
+            if vsrc.get("type") == "device":
+                self._recorder = CaptureDeviceRecorder(
+                    self._session_dir / "video.mp4",
+                    device_index=vsrc["index"],
+                    fps=settings.screen_fps,
+                    target_w=settings.screen_width,
+                    target_h=settings.screen_height,
+                )
+            else:
+                self._recorder = ScreenRecorder(
+                    self._session_dir / "video.mp4",
+                    settings.screen_window_title,
+                    fps=settings.screen_fps,
+                    target_w=settings.screen_width,
+                    target_h=settings.screen_height,
+                )
             self._recorder.start()
 
         if not cfg.get("no_rh_sim") and track_data:

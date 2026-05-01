@@ -178,3 +178,126 @@ class ScreenRecorder:
     @property
     def has_error(self) -> bool:
         return self._error is not None
+
+
+def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
+    """Return list of (index, label) for available cv2 capture devices (excluding virtual)."""
+    found = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY)
+        if cap.isOpened():
+            # Try to get a backend-specific name; fall back to generic label
+            name = cap.getBackendName()
+            found.append((i, f"Device {i} ({name})"))
+            cap.release()
+    return found
+
+
+class CaptureDeviceRecorder:
+    """Records video from a USB capture card / webcam via cv2.VideoCapture."""
+
+    def __init__(
+        self,
+        output_path: Path,
+        device_index: int,
+        fps: int = 60,
+        target_w: int = 1280,
+        target_h: int = 720,
+    ):
+        self._output = output_path
+        self._ts_path = output_path.parent / "video_timestamps.parquet"
+        self._device_index = device_index
+        self._fps = fps
+        self._target_w = target_w
+        self._target_h = target_h
+        self._thread: threading.Thread | None = None
+        self._running = False
+        self.frames_written = 0
+        self.actual_fps: float = float(fps)
+        self._error: Exception | None = None
+        self.latest_frame_bgr: np.ndarray | None = None
+
+    def start(self) -> None:
+        self._running = True
+        self._thread = threading.Thread(target=self._record_loop, daemon=True)
+        self._thread.start()
+        _log.info("Capture device recorder started: device=%d %dx%d@%dfps → %s",
+                  self._device_index, self._target_w, self._target_h, self._fps,
+                  self._output.name)
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=30)
+        if self._error:
+            _log.error("Capture device recorder error: %s", self._error)
+        else:
+            _log.info("Capture device recorder stopped: %d frames @ %.1f fps",
+                      self.frames_written, self.actual_fps)
+
+    def _record_loop(self) -> None:
+        try:
+            backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+            cap = cv2.VideoCapture(self._device_index, backend)
+            if not cap.isOpened():
+                raise RuntimeError(f"Cannot open capture device {self._device_index}")
+
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._target_w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._target_h)
+            cap.set(cv2.CAP_PROP_FPS, self._fps)
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(
+                str(self._output), fourcc, self._fps, (self._target_w, self._target_h)
+            )
+            interval = 1.0 / self._fps
+            frame_timestamps: list[float] = []
+
+            while self._running:
+                t0 = time.monotonic()
+                ts_wall = time.time()
+                ret, frame = cap.read()
+                if not ret:
+                    _log.warning("Capture device %d: failed to read frame", self._device_index)
+                    time.sleep(interval)
+                    continue
+
+                if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
+                    frame = cv2.resize(frame, (self._target_w, self._target_h))
+
+                writer.write(frame)
+                self.latest_frame_bgr = frame
+                frame_timestamps.append(ts_wall)
+                self.frames_written += 1
+
+                elapsed = time.monotonic() - t0
+                sleep = interval - elapsed
+                if sleep > 0:
+                    time.sleep(sleep)
+
+            cap.release()
+            writer.release()
+            self._save_timestamps(frame_timestamps)
+
+            if len(frame_timestamps) > 1:
+                duration = frame_timestamps[-1] - frame_timestamps[0]
+                if duration > 0:
+                    self.actual_fps = round(self.frames_written / duration, 1)
+
+        except Exception as exc:
+            self._error = exc
+            _log.exception("Capture device recorder crashed: %s", exc)
+
+    def _save_timestamps(self, timestamps: list[float]) -> None:
+        table = pa.table(
+            {
+                "frame_idx": pa.array(range(len(timestamps)), type=pa.int64()),
+                "ts_wall":   pa.array(timestamps, type=pa.float64()),
+            },
+            schema=_TIMESTAMPS_SCHEMA,
+        )
+        pq.write_table(table, self._ts_path, compression="snappy")
+
+    @property
+    def has_error(self) -> bool:
+        return self._error is not None

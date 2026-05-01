@@ -14,8 +14,10 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QGroupBox, QHBoxLayout, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
+
+from dct.screen_recorder import scan_video_devices
 
 from dct.gui import theme
 from dct.gui.global_hotkeys import GlobalHotkeyManager
@@ -77,6 +79,21 @@ class RecordBar(QWidget):
         for combo in (self._combo_pilot, self._combo_drone,
                       self._combo_rate, self._combo_camera, self._combo_track):
             cfg_lay.addWidget(combo)
+
+        # ── Video source ──────────────────────────────────────────────────
+        src_box = QGroupBox("Video source")
+        src_lay = QHBoxLayout(src_box)
+        src_lay.setSpacing(4)
+        self._combo_source = QComboBox()
+        self._combo_source.setMinimumWidth(160)
+        self._btn_refresh_src = QPushButton("↻")
+        self._btn_refresh_src.setFixedWidth(26)
+        self._btn_refresh_src.setToolTip("Refresh capture devices")
+        self._btn_refresh_src.clicked.connect(self._refresh_video_sources)
+        src_lay.addWidget(self._combo_source)
+        src_lay.addWidget(self._btn_refresh_src)
+        root.addWidget(src_box)
+        self._refresh_video_sources()
 
         root.addWidget(cfg_box)
 
@@ -142,9 +159,10 @@ class RecordBar(QWidget):
         self._recording = active
         self._set_buttons_recording(active)
         self.status.set_recording(active)
-        for combo in (self._combo_pilot, self._combo_drone,
-                      self._combo_rate, self._combo_camera, self._combo_track):
-            combo.setEnabled(not active)
+        for w in (self._combo_pilot, self._combo_drone, self._combo_rate,
+                  self._combo_camera, self._combo_track,
+                  self._combo_source, self._btn_refresh_src):
+            w.setEnabled(not active)
 
     def cleanup(self) -> None:
         """Снимает глобальные хоткеи — вызывать при закрытии окна."""
@@ -168,6 +186,20 @@ class RecordBar(QWidget):
             self.sf_requested.emit()
 
     # ── internal ───────────────────────────────────────────────────────────
+
+    def _refresh_video_sources(self) -> None:
+        current = self._combo_source.currentData()
+        self._combo_source.clear()
+        self._combo_source.addItem("Liftoff (screen capture)", userData={"type": "screen"})
+        for idx, label in scan_video_devices():
+            self._combo_source.addItem(f"HDZero monitor – {label}",
+                                       userData={"type": "device", "index": idx})
+        # Restore previous selection if still available
+        if current:
+            for i in range(self._combo_source.count()):
+                if self._combo_source.itemData(i) == current:
+                    self._combo_source.setCurrentIndex(i)
+                    break
 
     def _on_start(self) -> None:
         if self._recording:
@@ -199,13 +231,14 @@ class RecordBar(QWidget):
                     break
 
         cfg = {
-            "pilot":       pilot_data.get("nickname", pilot_data.get("id", "?")),
-            "drone":       drone_data.get("id", drone_data["name"]),
-            "track":       track_data.get("id", track_data["name"]),
-            "purpose":     "training",
-            "track_path":  str(track_path) if track_path.exists() else None,
-            "rate":        rate_data,
-            "camera":      camera_data,
+            "pilot":        pilot_data.get("nickname", pilot_data.get("id", "?")),
+            "drone":        drone_data.get("id", drone_data["name"]),
+            "track":        track_data.get("id", track_data["name"]),
+            "purpose":      "training",
+            "track_path":   str(track_path) if track_path.exists() else None,
+            "rate":         rate_data,
+            "camera":       camera_data,
+            "video_source": self._combo_source.currentData() or {"type": "screen"},
         }
         self.start_requested.emit(cfg)
 

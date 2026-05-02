@@ -210,10 +210,15 @@ def _list_dshow_video_devices() -> list[str]:
         return []
 
     names: list[str] = []
-    in_video_section = False
 
-    def _cb(level: int, component: str, message: str) -> None:
-        nonlocal in_video_section
+    with av.logging.Capture() as logs:
+        try:
+            av.open("dummy", format="dshow", options={"list_devices": "true"})
+        except Exception:
+            pass
+
+    in_video_section = False
+    for _level, _component, message in logs:
         msg = message.strip()
         if "DirectShow video devices" in msg:
             in_video_section = True
@@ -226,17 +231,6 @@ def _list_dshow_video_devices() -> list[str]:
                     names.append(name)
             except IndexError:
                 pass
-
-    saved_level = av.logging.get_level()
-    av.logging.set_level(av.logging.INFO)
-    av.logging.set_log_callback(_cb)
-    try:
-        av.open("dummy", format="dshow", options={"list_devices": "true"})
-    except Exception:
-        pass
-    finally:
-        av.logging.set_log_callback(None)
-        av.logging.set_level(saved_level)
 
     return names
 

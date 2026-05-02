@@ -180,12 +180,19 @@ class ScreenRecorder:
         return self._error is not None
 
 
-def _record_backend() -> int:
-    """Backend for recording: MSMF on Windows correctly negotiates MJPEG with USB
-    capture cards. DSHOW silently ignores CAP_PROP_FOURCC=MJPG and stays on YUY2."""
-    if sys.platform != "win32":
-        return cv2.CAP_ANY
-    return cv2.CAP_MSMF if hasattr(cv2, "CAP_MSMF") else cv2.CAP_DSHOW
+def _open_capture(device_index: int) -> cv2.VideoCapture:
+    """Open a capture device, preferring MSMF on Windows (proper MJPEG negotiation).
+    Falls back to DSHOW when MSMF cannot open the device — MSMF and DSHOW may use
+    different internal device indices for the same physical hardware."""
+    if sys.platform == "win32" and hasattr(cv2, "CAP_MSMF"):
+        cap = cv2.VideoCapture(device_index, cv2.CAP_MSMF)
+        if cap.isOpened():
+            _log.debug("Capture device %d opened via MSMF", device_index)
+            return cap
+        cap.release()
+        _log.debug("MSMF could not open device %d, falling back to DSHOW", device_index)
+    backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+    return cv2.VideoCapture(device_index, backend)
 
 
 def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
@@ -249,7 +256,7 @@ class CaptureDeviceRecorder:
 
     def _record_loop(self) -> None:
         try:
-            cap = cv2.VideoCapture(self._device_index, _record_backend())
+            cap = _open_capture(self._device_index)
             if not cap.isOpened():
                 raise RuntimeError(f"Cannot open capture device {self._device_index}")
 

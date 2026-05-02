@@ -21,8 +21,11 @@ def _next_session_index(base: Path, prefix: str) -> int:
     return max(indices, default=0) + 1
 
 
-def create_session(pilot: str, drone: str, track: str, purpose: str) -> Path:
-    base = settings.sessions_dir
+def create_session(
+    pilot: str, drone: str, track: str, purpose: str,
+    base_dir: Path | str | None = None,
+) -> Path:
+    base = Path(base_dir) if base_dir else settings.sessions_dir
     base.mkdir(parents=True, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y-%m-%d")

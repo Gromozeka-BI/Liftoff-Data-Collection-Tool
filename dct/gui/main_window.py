@@ -78,6 +78,7 @@ class MainWindow(QMainWindow):
 
         right_split = QSplitter(Qt.Orientation.Vertical)
         right_split.setHandleWidth(3)
+        right_split.setMinimumWidth(400)   # prevent graph column from collapsing
         self._video  = VideoPreviewWidget()
         self._graphs = StickGraphsWidget()
         right_split.addWidget(self._video)
@@ -85,6 +86,7 @@ class MainWindow(QMainWindow):
         right_split.setSizes([200, 560])
         splitter.addWidget(right_split)
         splitter.setSizes([840, 560])
+        splitter.setMinimumWidth(780)
         vbox.addWidget(splitter, stretch=1)
 
         self._stack   = QStackedWidget()
@@ -292,6 +294,17 @@ class MainWindow(QMainWindow):
         if self._replay:
             self._replay.deleteLater()
 
+        # Restore invert state saved during recording
+        invert_path = p / "invert.json"
+        if invert_path.exists():
+            import json as _json
+            try:
+                self._graphs.set_invert_state(
+                    _json.loads(invert_path.read_text(encoding="utf-8"))
+                )
+            except Exception:
+                pass
+
         rc_exists = (p / "rc_channels.parquet").exists()
         tl_exists = (p / "timeline.parquet").exists()
         if not (p / "telemetry.parquet").exists() and not tl_exists and not rc_exists:
@@ -358,6 +371,15 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_session_started(self, path: str) -> None:
         self._lbl_session.setText(Path(path).name)
+        # Save current invert state into session dir so Replay can restore it
+        import json as _json
+        try:
+            invert = self._graphs.get_invert_state()
+            (Path(path) / "invert.json").write_text(
+                _json.dumps(invert, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
 
     @pyqtSlot(dict)
     def _on_session_stopped(self, result: dict) -> None:

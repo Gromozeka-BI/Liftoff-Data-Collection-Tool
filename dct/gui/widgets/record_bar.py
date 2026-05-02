@@ -10,7 +10,7 @@ import threading
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -123,8 +123,11 @@ class RecordBar(QWidget):
 
         # ── Video source ───────────────────────────────────────────────────
         vid_box = QGroupBox("Video source")
-        vid_lay = QHBoxLayout(vid_box)
-        vid_lay.setSpacing(4)
+        vid_vlay = QVBoxLayout(vid_box)
+        vid_vlay.setSpacing(3)
+
+        vid_row = QHBoxLayout()
+        vid_row.setSpacing(4)
         self._combo_source = QComboBox()
         self._combo_source.setMinimumWidth(150)
         self._btn_refresh_src = QPushButton("↻")
@@ -132,8 +135,25 @@ class RecordBar(QWidget):
         self._btn_refresh_src.setToolTip("Refresh capture devices")
         self._btn_refresh_src.clicked.connect(self._refresh_video_sources)
         self._combo_source.currentIndexChanged.connect(self._on_video_source_changed)
-        vid_lay.addWidget(self._combo_source)
-        vid_lay.addWidget(self._btn_refresh_src)
+        vid_row.addWidget(self._combo_source)
+        vid_row.addWidget(self._btn_refresh_src)
+        vid_vlay.addLayout(vid_row)
+
+        # Save folder row
+        save_row = QHBoxLayout()
+        save_row.setSpacing(4)
+        self._lbl_sessions_dir = QLabel()
+        self._lbl_sessions_dir.setStyleSheet(f"color: {theme.DIM}; font-size: 9px;")
+        self._lbl_sessions_dir.setToolTip("Папка для сохранения сессий")
+        saved_dir = ui_settings.load().get("sessions_dir", "sessions")
+        self._lbl_sessions_dir.setText(str(saved_dir))
+        self._btn_browse_dir = QPushButton("📁")
+        self._btn_browse_dir.setFixedWidth(26)
+        self._btn_browse_dir.setToolTip("Выбрать папку сохранения сессий")
+        self._btn_browse_dir.clicked.connect(self._browse_sessions_dir)
+        save_row.addWidget(self._lbl_sessions_dir, stretch=1)
+        save_row.addWidget(self._btn_browse_dir)
+        vid_vlay.addLayout(save_row)
         root.addWidget(vid_box)
 
         # ── Status ────────────────────────────────────────────────────────
@@ -194,9 +214,11 @@ class RecordBar(QWidget):
         self._combo_ds_mode.currentIndexChanged.connect(self._save_settings)
         self._combo_com.currentIndexChanged.connect(self._save_settings)
 
-        # Defer heavy device scans to background threads so startup is instant
+        # Only scan COM ports automatically (lightweight). Video device scan is
+        # triggered by the user via ↻ to avoid DirectShow interference with the
+        # mouse cursor on Windows. The screen-capture option is always available.
+        self._combo_source.addItem("Liftoff (screen capture)", userData={"type": "screen"})
         QTimer.singleShot(200, self._refresh_com_ports)
-        QTimer.singleShot(300, self._refresh_video_sources)
 
     # ── public API ─────────────────────────────────────────────────────────
 
@@ -211,6 +233,18 @@ class RecordBar(QWidget):
         finally:
             self._loading = False
         self._restore_settings()
+
+    def _browse_sessions_dir(self) -> None:
+        current = ui_settings.load().get("sessions_dir", "sessions")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Выберите папку для сохранения сессий", current,
+        )
+        if folder:
+            self._lbl_sessions_dir.setText(folder)
+            ui_settings.update("sessions_dir", folder)
+
+    def get_sessions_dir(self) -> str:
+        return ui_settings.load().get("sessions_dir", "sessions")
 
     def _restore_settings(self) -> None:
         """Apply previously saved combo selections (called after profiles reload)."""
@@ -414,6 +448,7 @@ class RecordBar(QWidget):
             "video_source": self._combo_source.currentData() or {"type": "screen"},
             "data_source":  mode,
             "rc_port":      self._combo_com.currentText() or None,
+            "sessions_dir": self.get_sessions_dir(),
         }
         self.start_requested.emit(cfg)
 

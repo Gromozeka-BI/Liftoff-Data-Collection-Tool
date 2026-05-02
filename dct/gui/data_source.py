@@ -135,7 +135,8 @@ class LiveDataSource(QObject):
         use_rc        = self._ds_mode in (_SRC_RC, _SRC_BOTH)
 
         self._session_dir = create_session(
-            cfg["pilot"], cfg["drone"], cfg["track"], cfg.get("purpose", "training")
+            cfg["pilot"], cfg["drone"], cfg["track"], cfg.get("purpose", "training"),
+            base_dir=cfg.get("sessions_dir"),
         )
         if cfg.get("track_path"):
             copy_track(self._session_dir, Path(cfg["track_path"]))

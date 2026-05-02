@@ -29,18 +29,16 @@ def setup_logging(log_dir: str | Path | None = None, level: int = logging.DEBUG)
     console.setFormatter(fmt)
     root.addHandler(console)
 
-    # File handler — DEBUG and above, rotating 5 MB × 3 files
+    # File handler — DEBUG and above, one new file per run (timestamp in name)
+    import datetime as _dt
     if log_dir is None:
         log_dir = Path(__file__).resolve().parent.parent / "logs"
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "dct.log",
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding="utf-8",
-    )
+    ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file = log_dir / f"dct_{ts}.log"
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(fmt)
     root.addHandler(file_handler)

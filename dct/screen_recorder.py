@@ -211,11 +211,18 @@ def _list_dshow_video_devices() -> list[str]:
 
     names: list[str] = []
 
-    with av.logging.Capture() as logs:
-        try:
-            av.open("dummy", format="dshow", options={"list_devices": "true"})
-        except Exception:
-            pass
+    # dshow device-list messages are emitted at VERBOSE level; lower the threshold
+    # before entering Capture so they aren't filtered before reaching the buffer.
+    saved_level = av.logging.get_level()
+    av.logging.set_level(av.logging.VERBOSE)
+    try:
+        with av.logging.Capture() as logs:
+            try:
+                av.open("dummy", format="dshow", options={"list_devices": "true"})
+            except Exception:
+                pass
+    finally:
+        av.logging.set_level(saved_level)
 
     in_video_section = False
     for _level, _component, message in logs:
@@ -469,11 +476,14 @@ class PyAvCaptureRecorder:
         if self._device_index < len(dshow_names):
             device_uri = f"video={dshow_names[self._device_index]}"
         else:
-            self._error = RuntimeError(
-                f"Device index {self._device_index} not found via pyav dshow "
-                f"(found {len(dshow_names)} devices: {dshow_names})"
+            # pyav device enumeration failed — fall back to OpenCV capture.
+            # Video will record at the device's native FPS (may be ~10fps on some cards).
+            _log.warning(
+                "pyav dshow enumeration returned %d devices — "
+                "falling back to OpenCV CaptureDeviceRecorder",
+                len(dshow_names),
             )
-            _log.error(str(self._error))
+            self._record_loop_opencv()
             return
 
         _log.info("pyav opening device: %s", device_uri)
@@ -580,6 +590,57 @@ class PyAvCaptureRecorder:
             except Exception:
                 pass
             self._in_container = None
+
+    def _record_loop_opencv(self) -> None:
+        """Fallback path: record via OpenCV DSHOW when pyav device enumeration fails."""
+        _log.info("PyAv fallback: recording via OpenCV device=%d", self._device_index)
+        cap = _open_capture(self._device_index)
+        if not cap.isOpened():
+            self._error = RuntimeError(
+                f"OpenCV fallback: cannot open capture device {self._device_index}"
+            )
+            _log.error(str(self._error))
+            return
+
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._target_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._target_h)
+        cap.set(cv2.CAP_PROP_FPS, self._fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(
+            str(self._output), fourcc, self._fps, (self._target_w, self._target_h)
+        )
+        interval = 1.0 / self._fps
+        frame_timestamps: list[float] = []
+        t_start = time.monotonic()
+        frames_written_idx = 0
+
+        try:
+            while self._running:
+                ts_wall = time.time()
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
+                    frame = cv2.resize(frame, (self._target_w, self._target_h))
+                self.latest_frame_bgr = frame
+                now = time.monotonic()
+                frames_due = int((now - t_start) / interval) + 1
+                while frames_written_idx < frames_due:
+                    writer.write(frame)
+                    frame_timestamps.append(ts_wall)
+                    self.frames_written += 1
+                    frames_written_idx += 1
+        finally:
+            cap.release()
+            writer.release()
+            _write_timestamps(self._ts_path, frame_timestamps)
+            if len(frame_timestamps) > 1:
+                duration = frame_timestamps[-1] - frame_timestamps[0]
+                if duration > 0:
+                    self.actual_fps = round(self.frames_written / duration, 1)
 
     @property
     def has_error(self) -> bool:

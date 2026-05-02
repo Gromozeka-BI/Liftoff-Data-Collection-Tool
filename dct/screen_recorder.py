@@ -199,46 +199,47 @@ def _open_capture(device_index: int) -> cv2.VideoCapture:
 def _list_dshow_video_devices() -> list[str]:
     """Return DirectShow video device friendly names in enumeration order.
 
-    Uses pyav's log callback: ffmpeg prints device names when opened with
-    list_devices=true. The order matches OpenCV DSHOW index enumeration.
+    Reads from the Windows registry: DirectShow video input devices register
+    their friendly names under HKCR\\CLSID\\{860BB310...}\\Instance.
+    The registry enumeration order matches ICreateDevEnum (alphabetical by
+    filter name), which is the same order OpenCV DSHOW uses for indices.
     """
     if sys.platform != "win32":
         return []
     try:
-        import av
+        import winreg
     except ImportError:
         return []
 
+    # CLSID for VideoInputDeviceCategory
+    VIDEO_INPUT_CAT = "{860BB310-5D01-11d0-BD3B-00A0C911CE86}"
+    key_path = f"CLSID\\{VIDEO_INPUT_CAT}\\Instance"
+
     names: list[str] = []
-
-    # dshow device-list messages are emitted at VERBOSE level; lower the threshold
-    # before entering Capture so they aren't filtered before reaching the buffer.
-    saved_level = av.logging.get_level()
-    av.logging.set_level(av.logging.VERBOSE)
     try:
-        with av.logging.Capture() as logs:
+        cat_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
+        i = 0
+        while True:
             try:
-                av.open("dummy", format="dshow", options={"list_devices": "true"})
-            except Exception:
-                pass
-    finally:
-        av.logging.set_level(saved_level)
+                clsid = winreg.EnumKey(cat_key, i)
+                try:
+                    dev_key = winreg.OpenKey(cat_key, clsid)
+                    friendly, _ = winreg.QueryValueEx(dev_key, "FriendlyName")
+                    winreg.CloseKey(dev_key)
+                    if friendly:
+                        names.append(friendly)
+                except OSError:
+                    pass
+                i += 1
+            except OSError:
+                break
+        winreg.CloseKey(cat_key)
+    except Exception as exc:
+        _log.debug("Registry dshow enumeration failed: %s", exc)
 
-    in_video_section = False
-    for _level, _component, message in logs:
-        msg = message.strip()
-        if "DirectShow video devices" in msg:
-            in_video_section = True
-        elif "DirectShow audio devices" in msg:
-            in_video_section = False
-        elif in_video_section and msg.startswith('"') and "Alternative name" not in msg:
-            try:
-                name = msg.split('"')[1]
-                if name:
-                    names.append(name)
-            except IndexError:
-                pass
-
+    # DirectShow enumerates in the same order as the registry key insertion
+    # order (which matches alphabetical sort for most drivers).
+    _log.debug("Registry dshow devices: %s", names)
     return names
 
 

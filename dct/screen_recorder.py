@@ -180,13 +180,22 @@ class ScreenRecorder:
         return self._error is not None
 
 
+def _win_backend() -> int:
+    """Prefer MSMF on Windows: it correctly negotiates MJPEG with USB capture cards.
+    DSHOW silently ignores CAP_PROP_FOURCC=MJPG and stays on YUY2, limiting FPS to ~10."""
+    if sys.platform != "win32":
+        return cv2.CAP_ANY
+    # MSMF is available on Windows 8+ and handles MJPEG format negotiation properly.
+    return cv2.CAP_MSMF if hasattr(cv2, "CAP_MSMF") else cv2.CAP_DSHOW
+
+
 def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
     """Return list of (index, label) for available cv2 capture devices (excluding virtual)."""
     found = []
+    backend = _win_backend()
     for i in range(max_index):
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY)
+        cap = cv2.VideoCapture(i, backend)
         if cap.isOpened():
-            # Try to get a backend-specific name; fall back to generic label
             name = cap.getBackendName()
             found.append((i, f"Device {i} ({name})"))
             cap.release()
@@ -237,8 +246,7 @@ class CaptureDeviceRecorder:
 
     def _record_loop(self) -> None:
         try:
-            backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
-            cap = cv2.VideoCapture(self._device_index, backend)
+            cap = cv2.VideoCapture(self._device_index, _win_backend())
             if not cap.isOpened():
                 raise RuntimeError(f"Cannot open capture device {self._device_index}")
 

@@ -491,7 +491,6 @@ class ReplayDataSource(QObject):
         if batch:
             self.telemetry_batch.emit(batch)
             self.telemetry_updated.emit(batch[-1])
-            self._emit_video_frame(batch[-1]["ts_wall"])
 
         # Emit RC batch
         rc_batch: list[dict] = []
@@ -505,6 +504,10 @@ class ReplayDataSource(QObject):
         while self._ev_idx < len(self._events) and self._events[self._ev_idx]["ts_wall"] <= target:
             self.event_fired.emit(self._events[self._ev_idx])
             self._ev_idx += 1
+
+        # Always update video position every tick — video must advance even in
+        # RC-only mode where telemetry batch is empty.
+        self._emit_video_frame(target)
 
         # Check finished (use timeline as primary)
         tl_done = target >= self._tl_ts[-1]

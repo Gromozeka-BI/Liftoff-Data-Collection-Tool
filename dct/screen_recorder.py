@@ -242,6 +242,10 @@ class CaptureDeviceRecorder:
             if not cap.isOpened():
                 raise RuntimeError(f"Cannot open capture device {self._device_index}")
 
+            # Request MJPEG from the device before setting resolution/FPS.
+            # Without this, DirectShow negotiates uncompressed YUV which is
+            # bandwidth-limited to ~10 FPS at 720p over USB 2.0.
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._target_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._target_h)
             cap.set(cv2.CAP_PROP_FPS, self._fps)

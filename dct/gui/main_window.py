@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QMainWindow, QMessageBox,
@@ -16,20 +15,22 @@ _LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
 
 from dct.gui import theme
 from dct.gui.data_source import LiveDataSource, ReplayDataSource
-from dct.log import get_logger
-
-_log = get_logger("main_window")
 from dct.gui.widgets.track_map import TrackMapWidget
 from dct.gui.widgets.stick_graphs import StickGraphsWidget
 from dct.gui.widgets.video_preview import VideoPreviewWidget
 from dct.gui.widgets.record_bar import RecordBar
 from dct.gui.widgets.replay_bar import ReplayBar
+from dct.video_preview_source import VideoPreviewSource
+from dct.log import get_logger
+
+_log = get_logger("main_window")
 
 _MODE_RECORD = 0
 _MODE_REPLAY = 1
 
 
 class MainWindow(QMainWindow):
+    _preview_frame_ready = pyqtSignal(object)  # thread-safe bridge for preview frames
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("DCT — Data Collection Toolkit")
@@ -38,20 +39,28 @@ class MainWindow(QMainWindow):
         self.resize(1400, 860)
 
         self._mode = _MODE_RECORD
-        self._live: LiveDataSource | None = None
-        self._replay: ReplayDataSource | None = None
-        self._lap_count = 0
-        self._total_laps = 0
+        self._live:    LiveDataSource | None     = None
+        self._replay:  ReplayDataSource | None   = None
+        self._preview: VideoPreviewSource | None = None
+        self._lap_count    = 0
+        self._total_laps   = 0
+        self._current_track: dict | None = None
+        self._latest_frame:  dict | None = None
 
         self._build_ui()
         self._connect_record_bar()
         self._connect_replay_bar()
 
-        # Global shortcuts active in both modes
         QShortcut(QKeySequence("F11"), self, self._toggle_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._replay_space)
 
-    # ── UI construction ────────────────────────────────────────────────────
+        # Bridge: preview thread → Qt main thread → VideoPreviewWidget
+        self._preview_frame_ready.connect(self._on_preview_frame_main)
+
+        # Delay preview start to avoid mouse jitter from mss/DirectX init
+        QTimer.singleShot(2000, lambda: self._start_preview(self._rec_bar.current_video_source()))
+
+    # ── UI ─────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -60,36 +69,29 @@ class MainWindow(QMainWindow):
         vbox.setSpacing(0)
         vbox.setContentsMargins(0, 0, 0, 0)
 
-        # Top mode bar
         vbox.addWidget(self._build_mode_bar())
 
-        # Main content area (resizable splitter)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(3)
-
-        # Left: track map
         self._map = TrackMapWidget()
         splitter.addWidget(self._map)
 
-        # Right: video + graphs (vertical splitter)
         right_split = QSplitter(Qt.Orientation.Vertical)
         right_split.setHandleWidth(3)
-        self._video = VideoPreviewWidget()
+        self._video  = VideoPreviewWidget()
         self._graphs = StickGraphsWidget()
         right_split.addWidget(self._video)
         right_split.addWidget(self._graphs)
         right_split.setSizes([200, 560])
         splitter.addWidget(right_split)
-
         splitter.setSizes([840, 560])
         vbox.addWidget(splitter, stretch=1)
 
-        # Bottom stacked bar: record / replay
-        self._stack = QStackedWidget()
+        self._stack   = QStackedWidget()
         self._rec_bar = RecordBar()
         self._rep_bar = ReplayBar()
-        self._stack.addWidget(self._rec_bar)   # index 0
-        self._stack.addWidget(self._rep_bar)   # index 1
+        self._stack.addWidget(self._rec_bar)
+        self._stack.addWidget(self._rep_bar)
         self._stack.setFixedHeight(145)
         vbox.addWidget(self._stack)
 
@@ -101,7 +103,6 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(8, 0, 8, 0)
         lay.setSpacing(4)
 
-        # Logo
         if _LOGO_PATH.exists():
             logo_lbl = QLabel()
             pix = QPixmap(str(_LOGO_PATH)).scaledToHeight(30, Qt.TransformationMode.SmoothTransformation)
@@ -128,25 +129,47 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._lbl_session)
         return bar
 
-    # ── mode switching ─────────────────────────────────────────────────────
+    # ── mode switching ──────────────────────────────────────────────────────
 
     def _switch_mode(self, mode: int) -> None:
-        # Запрет переключения во время записи
         if mode == _MODE_REPLAY and self._live and getattr(self._live, '_recording', False):
             return
         self._mode = mode
         self._btn_mode_rec.setChecked(mode == _MODE_RECORD)
         self._btn_mode_rep.setChecked(mode == _MODE_REPLAY)
         self._stack.setCurrentIndex(mode)
-        # Очищаем карту и графики при каждом переключении
         self._map.clear_trail()
         self._graphs.clear()
         self._video.clear_frame()
         self._lap_count = 0
-        if mode == _MODE_REPLAY:
+
+        if mode == _MODE_RECORD:
+            self._start_preview(self._rec_bar.current_video_source())
+        else:
+            self._stop_preview()
             self._rep_bar.reload_sessions()
 
-    # ── record bar wiring ──────────────────────────────────────────────────
+    # ── always-on preview ───────────────────────────────────────────────────
+
+    def _start_preview(self, source_cfg: dict) -> None:
+        self._stop_preview()
+        self._preview = VideoPreviewSource(source_cfg, self._on_preview_frame)
+        self._preview.start()
+
+    def _stop_preview(self) -> None:
+        if self._preview:
+            self._preview.stop()
+            self._preview = None
+
+    def _on_preview_frame(self, frame) -> None:
+        # Called from preview thread — route through queued signal for thread safety
+        self._preview_frame_ready.emit(frame)
+
+    @pyqtSlot(object)
+    def _on_preview_frame_main(self, frame) -> None:
+        self._video.update_frame(frame, is_rgb=False)
+
+    # ── record bar ──────────────────────────────────────────────────────────
 
     def _connect_record_bar(self) -> None:
         rb = self._rec_bar
@@ -155,10 +178,18 @@ class MainWindow(QMainWindow):
         rb.lap_requested.connect(self._on_mark_lap)
         rb.gate_requested.connect(self._on_mark_nearest_gate)
         rb.sf_requested.connect(self._on_mark_sf_gate)
+        rb.video_source_changed.connect(self._on_video_source_changed)
+
+    @pyqtSlot(dict)
+    def _on_video_source_changed(self, source_cfg: dict) -> None:
+        # Restart preview only if not currently recording
+        if self._mode == _MODE_RECORD and self._preview is not None:
+            self._start_preview(source_cfg)
 
     @pyqtSlot(dict)
     def _on_start_session(self, cfg: dict) -> None:
-        # Load track for the map
+        self._stop_preview()   # recorder takes over video
+
         track_path = cfg.get("track_path")
         if track_path:
             try:
@@ -172,11 +203,15 @@ class MainWindow(QMainWindow):
             self._current_track = None
 
         import time as _time
-        self._graphs.set_time_zero(_time.time())  # ось X от 0 с начала записи
+        self._graphs.set_time_zero(_time.time())
+
+        ds_mode = cfg.get("data_source", "liftoff")
 
         self._live = LiveDataSource(self)
         self._live.telemetry_updated.connect(self._on_telemetry)
         self._live.telemetry_batch.connect(self._graphs.update_batch)
+        self._live.rc_batch.connect(self._graphs.update_rc_batch)
+        self._live.rc_status_changed.connect(self._rec_bar.set_rc_status)
         self._live.event_fired.connect(self._on_event)
         self._live.stats_updated.connect(self._rec_bar.status.update_stats)
         self._live.video_frame.connect(self._on_live_video_frame)
@@ -189,6 +224,7 @@ class MainWindow(QMainWindow):
             _log.error("Failed to start session: %s", e)
             QMessageBox.critical(self, "Start error", str(e))
             self._live = None
+            self._start_preview(self._rec_bar.current_video_source())
             return
 
         self._map.clear_trail()
@@ -208,34 +244,34 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_mark_nearest_gate(self) -> None:
-        if not self._live or not hasattr(self, "_current_track") or not self._current_track:
+        if not self._live or not self._current_track:
             return
-        latest = getattr(self, "_latest_frame", None)
+        latest = self._latest_frame
         if not latest:
             return
+        import math
         gates = self._current_track.get("gates", [])
         sf_id = next((g["id"] for g in gates if g.get("is_start_finish")), None)
-        import math
         best_id, best_d = 0, float("inf")
         for g in gates:
             if g["id"] == sf_id:
                 continue
             gx, _gy, gz = g["position"]
-            d = math.sqrt((latest["pos_x"]-gx)**2 + (latest["pos_z"]-gz)**2)
+            d = math.sqrt((latest["pos_x"] - gx) ** 2 + (latest["pos_z"] - gz) ** 2)
             if d < best_d:
                 best_d, best_id = d, g["id"]
         self._live.mark_gate(best_id)
 
     @pyqtSlot()
     def _on_mark_sf_gate(self) -> None:
-        if not self._live or not hasattr(self, "_current_track") or not self._current_track:
+        if not self._live or not self._current_track:
             return
         gates = self._current_track.get("gates", [])
-        sf = next((g for g in gates if g.get("is_start_finish")), None)
+        sf    = next((g for g in gates if g.get("is_start_finish")), None)
         if sf:
             self._live.mark_gate(sf["id"])
 
-    # ── replay bar wiring ──────────────────────────────────────────────────
+    # ── replay bar ──────────────────────────────────────────────────────────
 
     def _connect_replay_bar(self) -> None:
         rb = self._rep_bar
@@ -256,15 +292,18 @@ class MainWindow(QMainWindow):
         if self._replay:
             self._replay.deleteLater()
 
-        telem = p / "telemetry.parquet"
-        if not telem.exists():
+        rc_exists = (p / "rc_channels.parquet").exists()
+        tl_exists = (p / "timeline.parquet").exists()
+        if not (p / "telemetry.parquet").exists() and not tl_exists and not rc_exists:
             return
+
         self._replay = ReplayDataSource(p, self)
-        # t=0 на оси времени = первый пакет сессии
         if self._replay.first_ts > 0:
             self._graphs.set_time_zero(self._replay.first_ts)
+
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
+        self._replay.rc_batch.connect(self._graphs.update_rc_batch)
         self._replay.event_fired.connect(self._on_event)
         self._replay.stats_updated.connect(self._rep_bar.status.update_stats)
         self._replay.video_frame.connect(self._on_replay_video_frame)
@@ -274,6 +313,9 @@ class MainWindow(QMainWindow):
         self._graphs.clear()
         self._lap_count = 0
         self._lbl_session.setText(p.name)
+
+        # Show first frame without pressing Play
+        self._replay.seek(0.0)
 
     @pyqtSlot()
     def _on_replay_play_pause(self) -> None:
@@ -286,7 +328,6 @@ class MainWindow(QMainWindow):
     def _on_replay_seek(self, fraction: float) -> None:
         if self._replay:
             self._replay.seek(fraction)
-            # Очищаем след и графики — данные будут перестроены от новой позиции
             self._map.clear_trail()
             self._graphs.clear()
 
@@ -299,7 +340,7 @@ class MainWindow(QMainWindow):
         if self._mode == _MODE_REPLAY:
             self._on_replay_play_pause()
 
-    # ── common slots ───────────────────────────────────────────────────────
+    # ── common slots ────────────────────────────────────────────────────────
 
     @pyqtSlot(dict)
     def _on_telemetry(self, frame: dict) -> None:
@@ -312,7 +353,6 @@ class MainWindow(QMainWindow):
     def _on_event(self, ev: dict) -> None:
         if "lap" in ev.get("event_type", ""):
             self._lap_count += 1
-            status = self._rec_bar.status if self._mode == _MODE_RECORD else self._rep_bar.status
             self._rep_bar.set_lap(self._lap_count, self._total_laps)
 
     @pyqtSlot(str)
@@ -325,27 +365,25 @@ class MainWindow(QMainWindow):
         val = result.get("validation")
         if val:
             status_str = "PASSED" if val.passed else "FAILED"
-            issues = "\n".join(val.issues) if val.issues else "All checks passed."
+            issues     = "\n".join(val.issues) if val.issues else "All checks passed."
             QMessageBox.information(
                 self, f"Session validation {status_str}",
                 f"Session: {result.get('session_dir', '')}\n\n"
                 f"Stats: {val.stats}\n\n{issues}",
             )
         self._live = None
-
-    # ── video frames ───────────────────────────────────────────────────────
+        # Resume live preview after recording ends
+        self._start_preview(self._rec_bar.current_video_source())
 
     @pyqtSlot(object)
     def _on_live_video_frame(self, frame) -> None:
-        # ScreenRecorder даёт BGR
         self._video.update_frame(frame, is_rgb=False)
 
     @pyqtSlot(object)
     def _on_replay_video_frame(self, frame) -> None:
-        # VideoReader уже конвертировал в RGB в фоновом потоке
         self._video.update_frame(frame, is_rgb=True)
 
-    # ── misc ───────────────────────────────────────────────────────────────
+    # ── misc ────────────────────────────────────────────────────────────────
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -354,7 +392,8 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     def closeEvent(self, event) -> None:
-        self._rec_bar.cleanup()  # снимаем global keyboard hooks
+        self._stop_preview()
+        self._rec_bar.cleanup()
         if self._live:
             self._live.stop_session()
         event.accept()

@@ -1,0 +1,97 @@
+"""Lightweight video preview source — screen/device capture without file recording.
+
+Used to show live preview in Record mode before (and after) a recording session.
+Runs at ~20 fps to minimise CPU load (UI doesn't need 60 fps for preview).
+"""
+from __future__ import annotations
+
+import sys
+import threading
+import time
+from typing import Callable
+
+import cv2
+import numpy as np
+
+from dct.log import get_logger
+
+_log = get_logger("video_preview_source")
+
+_PREVIEW_FPS = 20
+
+
+class VideoPreviewSource:
+    """Continuously captures frames and calls ``on_frame(bgr_array)`` on each."""
+
+    def __init__(self, source_cfg: dict, on_frame: Callable[[np.ndarray], None]):
+        self._cfg = source_cfg
+        self._on_frame = on_frame
+        self._thread: threading.Thread | None = None
+        self._running = False
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=3)
+            self._thread = None
+
+    # ── internal ───────────────────────────────────────────────────────────
+
+    def _loop(self) -> None:
+        if self._cfg.get("type") == "device":
+            self._loop_device()
+        else:
+            self._loop_screen()
+
+    def _loop_screen(self) -> None:
+        import mss
+        interval = 1.0 / _PREVIEW_FPS
+        try:
+            with mss.mss() as sct:
+                mon = sct.monitors[1]
+                while self._running:
+                    t0 = time.monotonic()
+                    img = np.array(sct.grab(mon))
+                    frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                    frame = cv2.resize(frame, (640, 360), interpolation=cv2.INTER_LINEAR)
+                    self._on_frame(frame)
+                    elapsed = time.monotonic() - t0
+                    rem = interval - elapsed
+                    if rem > 0:
+                        time.sleep(rem)
+        except Exception as exc:
+            if self._running:
+                _log.error("Screen preview error: %s", exc)
+
+    def _loop_device(self) -> None:
+        interval = 1.0 / _PREVIEW_FPS
+        idx = self._cfg.get("index", 0)
+        backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        cap = None
+        try:
+            cap = cv2.VideoCapture(idx, backend)
+            if not cap.isOpened():
+                _log.error("VideoPreviewSource: cannot open device %d", idx)
+                return
+            while self._running:
+                t0 = time.monotonic()
+                ret, frame = cap.read()
+                if ret:
+                    self._on_frame(frame)
+                elapsed = time.monotonic() - t0
+                rem = interval - elapsed
+                if rem > 0:
+                    time.sleep(rem)
+        except Exception as exc:
+            if self._running:
+                _log.error("Device preview error: %s", exc)
+        finally:
+            if cap:
+                cap.release()

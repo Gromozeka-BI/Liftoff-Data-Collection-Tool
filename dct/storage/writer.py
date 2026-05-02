@@ -9,7 +9,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from dct.storage.schema import TELEMETRY_SCHEMA, EVENTS_SCHEMA
+from dct.storage.schema import TELEMETRY_SCHEMA, EVENTS_SCHEMA, RC_CHANNELS_SCHEMA, TIMELINE_SCHEMA
 from dct.log import get_logger
 
 _log = get_logger("writer")
@@ -96,6 +96,56 @@ class StreamingParquetWriter:
                 self._writer.close()
                 self._writer = None
                 _log.info("Closed parquet writer: %s (total_rows=%d)", self._path.name, self.total_rows)
+
+
+class RCChannelsWriter(StreamingParquetWriter):
+    def __init__(self, session_dir: Path, flush_rows: int = 100, flush_interval: float = 1.0):
+        super().__init__(
+            session_dir / "rc_channels.parquet",
+            RC_CHANNELS_SCHEMA,
+            flush_rows,
+            flush_interval,
+        )
+
+
+class TimelineWriter:
+    """Writes ts_wall ticks to timeline.parquet — source-agnostic session clock."""
+
+    def __init__(self, session_dir: Path):
+        self._path = session_dir / "timeline.parquet"
+        self._buf: list[dict] = []
+        self._lock = threading.Lock()
+        self._writer: pq.ParquetWriter | None = None
+        self._seq = 0
+
+    def tick(self, ts_wall: float) -> None:
+        self._seq += 1
+        with self._lock:
+            self._buf.append({"seq": self._seq, "ts_wall": ts_wall})
+            if len(self._buf) >= 30:
+                self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        if not self._buf:
+            return
+        if self._writer is None:
+            self._writer = pq.ParquetWriter(self._path, TIMELINE_SCHEMA, compression="snappy")
+        table = pa.table(
+            {
+                "seq":     pa.array([r["seq"]     for r in self._buf], type=pa.int64()),
+                "ts_wall": pa.array([r["ts_wall"] for r in self._buf], type=pa.float64()),
+            },
+            schema=TIMELINE_SCHEMA,
+        )
+        self._writer.write_table(table)
+        self._buf.clear()
+
+    def close(self) -> None:
+        with self._lock:
+            self._flush_locked()
+            if self._writer:
+                self._writer.close()
+                self._writer = None
 
 
 class TelemetryWriter(StreamingParquetWriter):

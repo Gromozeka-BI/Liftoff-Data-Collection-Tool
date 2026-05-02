@@ -1,5 +1,24 @@
 import pyarrow as pa
 
+RC_CHANNELS_SCHEMA = pa.schema([
+    pa.field("seq",          pa.int64()),
+    pa.field("ts_wall",      pa.float64()),
+    pa.field("ts_device_us", pa.int64()),
+    pa.field("ch1",          pa.int32()),
+    pa.field("ch2",          pa.int32()),
+    pa.field("ch3",          pa.int32()),
+    pa.field("ch4",          pa.int32()),
+    pa.field("ch5",          pa.int32()),
+    pa.field("ch6",          pa.int32()),
+    pa.field("ch7",          pa.int32()),
+    pa.field("ch8",          pa.int32()),
+])
+
+TIMELINE_SCHEMA = pa.schema([
+    pa.field("seq",     pa.int64()),
+    pa.field("ts_wall", pa.float64()),
+])
+
 TELEMETRY_SCHEMA = pa.schema([
     pa.field("seq",        pa.int64()),
     pa.field("ts_wall",    pa.float64()),   # unix wall clock

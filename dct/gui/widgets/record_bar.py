@@ -1,29 +1,30 @@
-"""Bottom control bar for RECORD mode.
-
-Layout (horizontal):
-  [Config group: pilot/drone/rate/camera/track combos]
-  [Status panel]
-  [Buttons: 1-START  2-STOP  3-LAP  4-GATE  5-SF]
-"""
+"""Bottom control bar for RECORD mode."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+import threading
+
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QGroupBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QVBoxLayout, QWidget,
 )
 
 from dct.screen_recorder import scan_video_devices
-
+from dct.rc_receiver import scan_serial_ports
 from dct.gui import theme
 from dct.gui.global_hotkeys import GlobalHotkeyManager
 from dct.gui.widgets.status_panel import StatusPanel
 
 _PROFILES_DIR = Path("profiles")
+
+_SRC_LIFTOFF = "liftoff"
+_SRC_RC      = "rc"
+_SRC_BOTH    = "both"
 
 
 def _load_json(path: Path) -> Any:
@@ -51,12 +52,15 @@ def _pilots() -> list[dict]:
 
 
 class RecordBar(QWidget):
-    # Emitted with session config dict when Start is pressed
-    start_requested = pyqtSignal(dict)
-    stop_requested  = pyqtSignal()
-    lap_requested   = pyqtSignal()
-    gate_requested  = pyqtSignal()   # nearest gate
-    sf_requested    = pyqtSignal()   # start/finish gate
+    start_requested      = pyqtSignal(dict)
+    stop_requested       = pyqtSignal()
+    lap_requested        = pyqtSignal()
+    gate_requested       = pyqtSignal()
+    sf_requested         = pyqtSignal()
+    video_source_changed = pyqtSignal(dict)
+    # internal signals for background scan results
+    _video_devices_ready = pyqtSignal(list)
+    _com_ports_ready     = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -65,7 +69,7 @@ class RecordBar(QWidget):
         root.setSpacing(8)
         root.setContentsMargins(6, 4, 6, 4)
 
-        # ── Config group ──────────────────────────────────────────────────
+        # ── Session config ─────────────────────────────────────────────────
         cfg_box = QGroupBox("Session config")
         cfg_lay = QHBoxLayout(cfg_box)
         cfg_lay.setSpacing(6)
@@ -79,23 +83,55 @@ class RecordBar(QWidget):
         for combo in (self._combo_pilot, self._combo_drone,
                       self._combo_rate, self._combo_camera, self._combo_track):
             cfg_lay.addWidget(combo)
+        root.addWidget(cfg_box)
 
-        # ── Video source ──────────────────────────────────────────────────
-        src_box = QGroupBox("Video source")
-        src_lay = QHBoxLayout(src_box)
-        src_lay.setSpacing(4)
+        # ── Data sources ───────────────────────────────────────────────────
+        ds_box = QGroupBox("Data sources")
+        ds_lay = QVBoxLayout(ds_box)
+        ds_lay.setSpacing(3)
+
+        # Mode combo
+        self._combo_ds_mode = QComboBox()
+        self._combo_ds_mode.addItem("Liftoff only", userData=_SRC_LIFTOFF)
+        self._combo_ds_mode.addItem("RC only",      userData=_SRC_RC)
+        self._combo_ds_mode.addItem("Liftoff + RC", userData=_SRC_BOTH)
+        self._combo_ds_mode.setToolTip("Select active telemetry sources")
+        self._combo_ds_mode.currentIndexChanged.connect(self._on_ds_mode_changed)
+        ds_lay.addWidget(self._combo_ds_mode)
+
+        # COM port row
+        rc_row = QHBoxLayout()
+        rc_row.setSpacing(3)
+        self._combo_com = QComboBox()
+        self._combo_com.setMinimumWidth(90)
+        self._combo_com.setToolTip("RC receiver COM port")
+        self._btn_refresh_com = QPushButton("↻")
+        self._btn_refresh_com.setFixedWidth(22)
+        self._btn_refresh_com.setToolTip("Refresh COM ports")
+        self._btn_refresh_com.clicked.connect(self._refresh_com_ports)
+        self._lbl_rc_status = QLabel("●")
+        self._lbl_rc_status.setStyleSheet(f"color: {theme.WARN}; font-size: 14px;")
+        self._lbl_rc_status.setToolTip("RC receiver: offline")
+        rc_row.addWidget(self._combo_com)
+        rc_row.addWidget(self._btn_refresh_com)
+        rc_row.addWidget(self._lbl_rc_status)
+        ds_lay.addLayout(rc_row)
+        root.addWidget(ds_box)
+
+        # ── Video source ───────────────────────────────────────────────────
+        vid_box = QGroupBox("Video source")
+        vid_lay = QHBoxLayout(vid_box)
+        vid_lay.setSpacing(4)
         self._combo_source = QComboBox()
-        self._combo_source.setMinimumWidth(160)
+        self._combo_source.setMinimumWidth(150)
         self._btn_refresh_src = QPushButton("↻")
-        self._btn_refresh_src.setFixedWidth(26)
+        self._btn_refresh_src.setFixedWidth(22)
         self._btn_refresh_src.setToolTip("Refresh capture devices")
         self._btn_refresh_src.clicked.connect(self._refresh_video_sources)
-        src_lay.addWidget(self._combo_source)
-        src_lay.addWidget(self._btn_refresh_src)
-        root.addWidget(src_box)
-        self._refresh_video_sources()
-
-        root.addWidget(cfg_box)
+        self._combo_source.currentIndexChanged.connect(self._on_video_source_changed)
+        vid_lay.addWidget(self._combo_source)
+        vid_lay.addWidget(self._btn_refresh_src)
+        root.addWidget(vid_box)
 
         # ── Status ────────────────────────────────────────────────────────
         self.status = StatusPanel()
@@ -105,7 +141,6 @@ class RecordBar(QWidget):
         btn_box = QGroupBox("Controls")
         btn_lay = QVBoxLayout(btn_box)
         btn_lay.setSpacing(4)
-
         row1 = QHBoxLayout()
         row2 = QHBoxLayout()
         btn_lay.addLayout(row1)
@@ -116,7 +151,6 @@ class RecordBar(QWidget):
         self._btn_lap   = self._make_btn("8  LAP",   "",          row2)
         self._btn_gate  = self._make_btn("9  GATE",  "",          row2)
         self._btn_sf    = self._make_btn("0  S/F",   "",          row2)
-
         root.addWidget(btn_box)
 
         # Connections
@@ -126,7 +160,6 @@ class RecordBar(QWidget):
         self._btn_gate.clicked.connect(self.gate_requested)
         self._btn_sf.clicked.connect(self.sf_requested)
 
-        # Qt-шорткаты (резервные, работают когда DCT в фокусе)
         self._shortcuts = []
         for key, slot in [("6", self._on_start), ("7", self.stop_requested),
                           ("8", self.lap_requested), ("9", self.gate_requested),
@@ -136,20 +169,27 @@ class RecordBar(QWidget):
             sc.activated.connect(slot)
             self._shortcuts.append(sc)
 
-        # Глобальные хоткеи через keyboard lib (работают из симулятора)
         self._hotkeys = GlobalHotkeyManager()
         for key, slot in [("6", self._on_start), ("7", self._stop_safe),
                           ("8", self._lap_safe), ("9", self._gate_safe),
                           ("0", self._sf_safe)]:
             self._hotkeys.register(key, slot)
 
+        # Wire background scan signals before deferring scans
+        self._video_devices_ready.connect(self._apply_video_devices)
+        self._com_ports_ready.connect(self._apply_com_ports)
+
         self._set_buttons_recording(False)
         self.reload_profiles()
+        self._on_ds_mode_changed()
+        # Defer heavy device scans to background threads so startup is instant
+        QTimer.singleShot(200, self._refresh_com_ports)
+        QTimer.singleShot(300, self._refresh_video_sources)
 
     # ── public API ─────────────────────────────────────────────────────────
 
     def reload_profiles(self) -> None:
-        self._fill_combo(self._combo_pilot,  _pilots(),      "nickname")
+        self._fill_combo(self._combo_pilot,  _pilots(),            "nickname")
         self._fill_combo(self._combo_drone,  _scan_dir("drones"),  "name")
         self._fill_combo(self._combo_rate,   _scan_dir("rates"),   "name")
         self._fill_combo(self._combo_camera, _scan_dir("cameras"), "name")
@@ -161,45 +201,89 @@ class RecordBar(QWidget):
         self.status.set_recording(active)
         for w in (self._combo_pilot, self._combo_drone, self._combo_rate,
                   self._combo_camera, self._combo_track,
+                  self._combo_ds_mode, self._combo_com, self._btn_refresh_com,
                   self._combo_source, self._btn_refresh_src):
             w.setEnabled(not active)
 
+    def set_rc_status(self, online: bool) -> None:
+        """Update the RC online/offline indicator (called from main thread)."""
+        if online:
+            self._lbl_rc_status.setStyleSheet(f"color: {theme.OK}; font-size: 14px;")
+            self._lbl_rc_status.setToolTip("RC receiver: online")
+        else:
+            self._lbl_rc_status.setStyleSheet(f"color: {theme.ERR}; font-size: 14px;")
+            self._lbl_rc_status.setToolTip("RC receiver: offline")
+
+    def current_video_source(self) -> dict:
+        return self._combo_source.currentData() or {"type": "screen"}
+
     def cleanup(self) -> None:
-        """Снимает глобальные хоткеи — вызывать при закрытии окна."""
         self._hotkeys.unregister_all()
 
-    # Обёртки для глобальных хоткеев: фильтруем лишние события
+    # ── private slots ──────────────────────────────────────────────────────
+
     def _stop_safe(self) -> None:
-        if self._recording:
-            self.stop_requested.emit()
+        if self._recording: self.stop_requested.emit()
 
     def _lap_safe(self) -> None:
-        if self._recording:
-            self.lap_requested.emit()
+        if self._recording: self.lap_requested.emit()
 
     def _gate_safe(self) -> None:
-        if self._recording:
-            self.gate_requested.emit()
+        if self._recording: self.gate_requested.emit()
 
     def _sf_safe(self) -> None:
-        if self._recording:
-            self.sf_requested.emit()
+        if self._recording: self.sf_requested.emit()
 
-    # ── internal ───────────────────────────────────────────────────────────
+    def _on_ds_mode_changed(self) -> None:
+        mode = self._combo_ds_mode.currentData()
+        rc_needed = mode in (_SRC_RC, _SRC_BOTH)
+        self._combo_com.setEnabled(rc_needed)
+        self._btn_refresh_com.setEnabled(rc_needed)
+        self._lbl_rc_status.setVisible(rc_needed)
+
+    def _on_video_source_changed(self) -> None:
+        data = self._combo_source.currentData()
+        if data:
+            self.video_source_changed.emit(data)
+
+    def _refresh_com_ports(self) -> None:
+        """Scan COM ports in a background thread to avoid blocking the UI."""
+        threading.Thread(target=self._scan_com_bg, daemon=True).start()
+
+    def _scan_com_bg(self) -> None:
+        self._com_ports_ready.emit(scan_serial_ports())
+
+    @pyqtSlot(list)
+    def _apply_com_ports(self, ports: list) -> None:
+        current = self._combo_com.currentText()
+        self._combo_com.clear()
+        for port in ports:
+            self._combo_com.addItem(port)
+        idx = self._combo_com.findText(current)
+        if idx >= 0:
+            self._combo_com.setCurrentIndex(idx)
 
     def _refresh_video_sources(self) -> None:
+        """Scan capture devices in a background thread (cv2 can be slow on Windows)."""
+        threading.Thread(target=self._scan_video_bg, daemon=True).start()
+
+    def _scan_video_bg(self) -> None:
+        self._video_devices_ready.emit(scan_video_devices())
+
+    @pyqtSlot(list)
+    def _apply_video_devices(self, devices: list) -> None:
         current = self._combo_source.currentData()
+        self._combo_source.blockSignals(True)
         self._combo_source.clear()
         self._combo_source.addItem("Liftoff (screen capture)", userData={"type": "screen"})
-        for idx, label in scan_video_devices():
-            self._combo_source.addItem(f"HDZero monitor – {label}",
-                                       userData={"type": "device", "index": idx})
-        # Restore previous selection if still available
+        for idx, label in devices:
+            self._combo_source.addItem(f"HDZero – {label}", userData={"type": "device", "index": idx})
         if current:
             for i in range(self._combo_source.count()):
                 if self._combo_source.itemData(i) == current:
                     self._combo_source.setCurrentIndex(i)
                     break
+        self._combo_source.blockSignals(False)
 
     def _on_start(self) -> None:
         if self._recording:
@@ -211,9 +295,14 @@ class RecordBar(QWidget):
         camera_data = self._combo_camera.currentData()
 
         missing = []
-        if not pilot_data:  missing.append("Pilot")
-        if not drone_data:  missing.append("Drone")
-        if not track_data:  missing.append("Track")
+        if not pilot_data: missing.append("Pilot")
+        if not drone_data: missing.append("Drone")
+        if not track_data: missing.append("Track")
+
+        mode = self._combo_ds_mode.currentData() or _SRC_LIFTOFF
+        if mode in (_SRC_RC, _SRC_BOTH) and not self._combo_com.currentText():
+            missing.append("RC COM port")
+
         if missing:
             QMessageBox.warning(
                 self, "Session config incomplete",
@@ -223,7 +312,6 @@ class RecordBar(QWidget):
 
         track_path = Path("tracks") / f"{track_data.get('id', track_data['name'])}.json"
         if not track_path.exists():
-            # Try finding by scanning
             for p in Path("tracks").glob("*.json"):
                 d = _load_json(p)
                 if d.get("name") == track_data["name"]:
@@ -239,6 +327,8 @@ class RecordBar(QWidget):
             "rate":         rate_data,
             "camera":       camera_data,
             "video_source": self._combo_source.currentData() or {"type": "screen"},
+            "data_source":  mode,
+            "rc_port":      self._combo_com.currentText() or None,
         }
         self.start_requested.emit(cfg)
 

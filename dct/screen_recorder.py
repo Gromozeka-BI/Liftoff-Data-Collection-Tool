@@ -253,27 +253,36 @@ class CaptureDeviceRecorder:
             interval = 1.0 / self._fps
             frame_timestamps: list[float] = []
 
+            # Track real-time progress so we can pad with duplicate frames when the
+            # capture device delivers fewer FPS than the target (e.g. 10 vs 30).
+            # This keeps the output file at correct real-time speed regardless of
+            # actual device frame rate.
+            t_start = time.monotonic()
+            frames_written_idx = 0  # total frames written to VideoWriter
+
             while self._running:
-                t0 = time.monotonic()
                 ts_wall = time.time()
                 ret, frame = cap.read()
                 if not ret:
                     _log.warning("Capture device %d: failed to read frame", self._device_index)
-                    time.sleep(interval)
                     continue
 
                 if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
                     frame = cv2.resize(frame, (self._target_w, self._target_h))
 
-                writer.write(frame)
                 self.latest_frame_bgr = frame
-                frame_timestamps.append(ts_wall)
-                self.frames_written += 1
 
-                elapsed = time.monotonic() - t0
-                sleep = interval - elapsed
-                if sleep > 0:
-                    time.sleep(sleep)
+                # How many frames should exist in the file by now (real-time)?
+                now = time.monotonic()
+                frames_due = int((now - t_start) / interval) + 1
+
+                # Write this frame once per "slot" that has passed since the last read.
+                # When the device delivers 10 FPS each captured frame fills ~3 slots.
+                while frames_written_idx < frames_due:
+                    writer.write(frame)
+                    frame_timestamps.append(ts_wall)
+                    self.frames_written += 1
+                    frames_written_idx += 1
 
             cap.release()
             writer.release()

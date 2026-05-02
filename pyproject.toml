@@ -23,6 +23,7 @@ dependencies = [
     "pyqtgraph>=0.13",
     "keyboard>=0.13; sys_platform == 'win32'",
     "pyserial>=3.5",
+    "av>=12.0",
 ]
 
 [project.scripts]

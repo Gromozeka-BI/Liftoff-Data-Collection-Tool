@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 
 from dct.screen_recorder import scan_video_devices
 from dct.rc_receiver import scan_serial_ports
-from dct.gui import theme
+from dct.gui import theme, ui_settings
 from dct.gui.global_hotkeys import GlobalHotkeyManager
 from dct.gui.widgets.status_panel import StatusPanel
 
@@ -64,7 +64,10 @@ class RecordBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._recording = False
+        self._recording         = False
+        self._loading           = False   # True while programmatically restoring settings
+        self._saved_com_port    = ""
+        self._saved_video_index = None
         root = QHBoxLayout(self)
         root.setSpacing(8)
         root.setContentsMargins(6, 4, 6, 4)
@@ -180,8 +183,17 @@ class RecordBar(QWidget):
         self._com_ports_ready.connect(self._apply_com_ports)
 
         self._set_buttons_recording(False)
-        self.reload_profiles()
+        self.reload_profiles()          # fills combos AND restores saved selections
         self._on_ds_mode_changed()
+
+        # Connect save-on-change AFTER initial restore so we don't overwrite
+        # good saved state with empty values during startup population.
+        for combo in (self._combo_pilot, self._combo_drone, self._combo_rate,
+                      self._combo_camera, self._combo_track):
+            combo.currentIndexChanged.connect(self._save_settings)
+        self._combo_ds_mode.currentIndexChanged.connect(self._save_settings)
+        self._combo_com.currentIndexChanged.connect(self._save_settings)
+
         # Defer heavy device scans to background threads so startup is instant
         QTimer.singleShot(200, self._refresh_com_ports)
         QTimer.singleShot(300, self._refresh_video_sources)
@@ -189,11 +201,65 @@ class RecordBar(QWidget):
     # ── public API ─────────────────────────────────────────────────────────
 
     def reload_profiles(self) -> None:
-        self._fill_combo(self._combo_pilot,  _pilots(),            "nickname")
-        self._fill_combo(self._combo_drone,  _scan_dir("drones"),  "name")
-        self._fill_combo(self._combo_rate,   _scan_dir("rates"),   "name")
-        self._fill_combo(self._combo_camera, _scan_dir("cameras"), "name")
-        self._fill_combo(self._combo_track,  _scan_tracks(),       "name")
+        self._loading = True
+        try:
+            self._fill_combo(self._combo_pilot,  _pilots(),            "nickname")
+            self._fill_combo(self._combo_drone,  _scan_dir("drones"),  "name")
+            self._fill_combo(self._combo_rate,   _scan_dir("rates"),   "name")
+            self._fill_combo(self._combo_camera, _scan_dir("cameras"), "name")
+            self._fill_combo(self._combo_track,  _scan_tracks(),       "name")
+        finally:
+            self._loading = False
+        self._restore_settings()
+
+    def _restore_settings(self) -> None:
+        """Apply previously saved combo selections (called after profiles reload)."""
+        s = ui_settings.load()
+        self._loading = True
+        try:
+            for combo, key in [
+                (self._combo_pilot,  "pilot"),
+                (self._combo_drone,  "drone"),
+                (self._combo_rate,   "rate"),
+                (self._combo_camera, "camera"),
+                (self._combo_track,  "track"),
+            ]:
+                text = s.get(key, "")
+                if text:
+                    idx = combo.findText(text)
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+
+            # Data source mode
+            mode = s.get("ds_mode")
+            if mode:
+                for i in range(self._combo_ds_mode.count()):
+                    if self._combo_ds_mode.itemData(i) == mode:
+                        self._combo_ds_mode.setCurrentIndex(i)
+                        break
+        finally:
+            self._loading = False
+
+        # COM port and video source are restored after async scans complete;
+        # stash the saved values so the scan callbacks can pick them up.
+        self._saved_com_port    = s.get("com_port", "")
+        self._saved_video_index = s.get("video_source_index")   # device index or None
+
+    def _save_settings(self) -> None:
+        """Persist current combo selections to ui_settings.json."""
+        if self._loading:
+            return
+        d = ui_settings.load()
+        d.update({
+            "pilot":    self._combo_pilot.currentText(),
+            "drone":    self._combo_drone.currentText(),
+            "rate":     self._combo_rate.currentText(),
+            "camera":   self._combo_camera.currentText(),
+            "track":    self._combo_track.currentText(),
+            "ds_mode":  self._combo_ds_mode.currentData(),
+            "com_port": self._combo_com.currentText(),
+        })
+        ui_settings.save(d)
 
     def set_recording(self, active: bool) -> None:
         self._recording = active
@@ -256,12 +322,16 @@ class RecordBar(QWidget):
     @pyqtSlot(list)
     def _apply_com_ports(self, ports: list) -> None:
         current = self._combo_com.currentText()
+        self._combo_com.blockSignals(True)
         self._combo_com.clear()
         for port in ports:
             self._combo_com.addItem(port)
-        idx = self._combo_com.findText(current)
+        # Prefer: currently selected → saved setting
+        target = current or getattr(self, "_saved_com_port", "")
+        idx = self._combo_com.findText(target)
         if idx >= 0:
             self._combo_com.setCurrentIndex(idx)
+        self._combo_com.blockSignals(False)
 
     def _refresh_video_sources(self) -> None:
         """Scan capture devices in a background thread (cv2 can be slow on Windows)."""
@@ -272,18 +342,33 @@ class RecordBar(QWidget):
 
     @pyqtSlot(list)
     def _apply_video_devices(self, devices: list) -> None:
-        current = self._combo_source.currentData()
+        current      = self._combo_source.currentData()
+        saved_index  = getattr(self, "_saved_video_index", None)
         self._combo_source.blockSignals(True)
         self._combo_source.clear()
         self._combo_source.addItem("Liftoff (screen capture)", userData={"type": "screen"})
         for idx, label in devices:
             self._combo_source.addItem(f"HDZero – {label}", userData={"type": "device", "index": idx})
+
+        # Restore: prefer current selection → saved device index → first item
+        restored = False
         if current:
             for i in range(self._combo_source.count()):
                 if self._combo_source.itemData(i) == current:
                     self._combo_source.setCurrentIndex(i)
+                    restored = True
+                    break
+        if not restored and saved_index is not None:
+            for i in range(self._combo_source.count()):
+                d = self._combo_source.itemData(i)
+                if d and d.get("type") == "device" and d.get("index") == saved_index:
+                    self._combo_source.setCurrentIndex(i)
                     break
         self._combo_source.blockSignals(False)
+        # Persist the device index so future restarts can find it
+        d = self._combo_source.currentData()
+        if d and d.get("type") == "device":
+            ui_settings.update("video_source_index", d["index"])
 
     def _on_start(self) -> None:
         if self._recording:

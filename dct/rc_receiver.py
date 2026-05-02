@@ -92,28 +92,47 @@ class RCReceiver:
                 self._on_status_change(state)
 
     def _read_loop(self) -> None:
+        """High-throughput read loop.
+
+        Instead of pyserial's ``readline()`` (which calls ``read(1)`` in a loop
+        — up to 5 000 syscalls/s at 100 Hz × 50 B/packet on Windows), we read
+        all bytes currently in the OS buffer in a single ``read()`` call and
+        split by ``\\n`` ourselves.  This reduces syscall overhead by ~50× and
+        eliminates the growing lag that caused RC data to drift off-screen.
+        """
         import serial
         while self._running:
             try:
                 _log.info("RC: connecting to %s @%d baud", self._port, _BAUD)
-                with serial.Serial(self._port, _BAUD, timeout=1.0) as ser:
-                    # Discard data that accumulated in the OS serial buffer before
-                    # we opened the port (without this, old packets get ts_wall="now"
-                    # shifting all RC timestamps forward by the buffer depth).
+                # timeout=0.05 s: blocks up to 50 ms waiting for the first byte,
+                # then returns immediately with whatever is in the buffer.
+                with serial.Serial(self._port, _BAUD, timeout=0.05) as ser:
                     ser.reset_input_buffer()
-                    # Reset anchor so the first fresh packet re-calibrates the clock.
                     self._anchor_wall = None
                     self._prev_dev    = None
                     self._elapsed_us  = 0
                     self._set_connected(True)
                     self._disconnect_logged = False
                     _log.info("RC: connected to %s", self._port)
+
+                    buf = bytearray()
                     while self._running:
-                        raw = ser.readline()
-                        ts  = time.time()   # used only for the first-packet anchor
-                        if not raw:
+                        # Read everything currently in the OS buffer (or wait up
+                        # to 50 ms for the first byte when the buffer is empty).
+                        waiting = ser.in_waiting
+                        chunk   = ser.read(waiting if waiting > 0 else 1)
+                        if not chunk:
                             continue
-                        self._parse(raw, ts)
+                        ts = time.time()   # one timestamp per read burst
+                        buf.extend(chunk)
+
+                        # Process all complete lines in the accumulation buffer.
+                        while b"\n" in buf:
+                            idx  = buf.index(b"\n")
+                            line = bytes(buf[: idx + 1])
+                            buf  = buf[idx + 1 :]
+                            self._parse(line, ts)
+
             except Exception as exc:
                 self._set_connected(False)
                 if self._running and not self._disconnect_logged:

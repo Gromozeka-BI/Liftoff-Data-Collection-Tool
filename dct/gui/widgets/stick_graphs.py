@@ -2,15 +2,16 @@
 
 Layout
 ------
-[⇔ Merge Liftoff+RC]          ← full-width toggle button
-[T  |  Thr ]  ←─ row 0        ← 4 rows, same height both sides
-[Y  |  Yaw ]  ←─ row 1
-[P  |  Pit ]  ←─ row 2
-[R  |  Rol ]  ←─ row 3
-[  Combined (all LF+RC)  ]    ← full-width, bottom axis visible
-[Ch5 Ch6 Ch7 Ch8]             ← full-width switch indicators
+[⇔ Merge Liftoff+RC]              ← full-width toggle button
+[T plot | ☐] [☐ | Thr plot]       ← 4 rows, same height both sides
+[Y plot | ☐] [☐ | Yaw plot]         ☐ = invert checkbox (display only)
+[P plot | ☐] [☐ | Pit plot]
+[R plot | ☐] [☐ | Rol plot]
+[  Combined (all LF+RC)  ]        ← full-width, bottom axis visible
+[Ch5 Ch6 Ch7 Ch8]                 ← full-width switch indicators
 
 Merge mode: RC column hidden; RC curves overlaid (dashed) on LF plots.
+Invert checkboxes flip the DISPLAYED sign only; recorded data is unchanged.
 """
 from __future__ import annotations
 
@@ -22,14 +23,14 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from dct.gui import theme
+from dct.gui import ui_settings
 
 # ── Channel tables ─────────────────────────────────────────────────────────────
 
-# LF channels: (label, frame_key, color)
 _LF = [
     ("T", "in_throttle", theme.STICK_T),
     ("Y", "in_yaw",      theme.STICK_Y),
@@ -37,7 +38,6 @@ _LF = [
     ("R", "in_roll",     theme.STICK_R),
 ]
 
-# RC channels paired with LF by meaning: T↔ch3, Y↔ch4, P↔ch2, R↔ch1
 _RC = [
     ("Thr", "ch3", "#ff9955"),
     ("Yaw", "ch4", "#99ddff"),
@@ -45,9 +45,9 @@ _RC = [
     ("Rol", "ch1", "#ffdd99"),
 ]
 
-_SW_LOW  = "#cc3333"   # < 1300
-_SW_MID  = "#ccaa00"   # 1300–1700
-_SW_HIGH = "#33aa33"   # > 1700
+_SW_LOW  = "#cc3333"
+_SW_MID  = "#ccaa00"
+_SW_HIGH = "#33aa33"
 
 _WINDOW    = 10.0
 _MAXPTS    = 1200
@@ -55,7 +55,7 @@ _RC_Y_MIN  = 800
 _RC_Y_MAX  = 2200
 _RC_CENTER = 1500.0
 _RC_HALF   = 500.0
-_PLOT_H    = 70        # fixed height for every individual plot row
+_PLOT_H    = 70
 
 
 class StickGraphsWidget(QWidget):
@@ -70,14 +70,18 @@ class StickGraphsWidget(QWidget):
         self._sw:     dict[str, int]          = {f"ch{i}": 1500 for i in range(5, 9)}
 
         # ── Plot / curve registries ──────────────────────────────────────────
-        self._lf_plots:   list[pg.PlotWidget]       = []   # 4 individual LF
-        self._rc_plots:   list[pg.PlotWidget]       = []   # 4 individual RC
-        self._all_plots:  list[pg.PlotWidget]       = []   # everything (for XRange sync)
-        self._lf_curves:  dict[str, pg.PlotDataItem] = {}  # individual LF
-        self._rc_curves:  dict[str, pg.PlotDataItem] = {}  # individual RC
-        self._comb_lf:    dict[str, pg.PlotDataItem] = {}  # LF on combined plot
-        self._comb_rc:    dict[str, pg.PlotDataItem] = {}  # RC on combined plot (dashed)
-        self._rc_merged:  dict[str, pg.PlotDataItem] = {}  # RC on LF plots (merge mode)
+        self._lf_plots:   list[pg.PlotWidget]        = []
+        self._rc_plots:   list[pg.PlotWidget]        = []
+        self._all_plots:  list[pg.PlotWidget]        = []
+        self._lf_curves:  dict[str, pg.PlotDataItem] = {}
+        self._rc_curves:  dict[str, pg.PlotDataItem] = {}
+        self._comb_lf:    dict[str, pg.PlotDataItem] = {}
+        self._comb_rc:    dict[str, pg.PlotDataItem] = {}
+        self._rc_merged:  dict[str, pg.PlotDataItem] = {}
+
+        # ── Invert checkboxes ────────────────────────────────────────────────
+        self._lf_inv: dict[str, QCheckBox] = {}
+        self._rc_inv: dict[str, QCheckBox] = {}
 
         self._merged      = False
         self._last_redraw = 0.0
@@ -88,7 +92,7 @@ class StickGraphsWidget(QWidget):
         root.setSpacing(2)
         root.setContentsMargins(0, 0, 0, 0)
 
-        # ── Row 0: Merge button (full width) ─────────────────────────────
+        # ── Row 0: Merge button ───────────────────────────────────────────
         self._btn_merge = QPushButton("⇔ Merge Liftoff + RC")
         self._btn_merge.setCheckable(True)
         self._btn_merge.setFixedHeight(24)
@@ -110,40 +114,60 @@ class StickGraphsWidget(QWidget):
         rc_col.setSpacing(2)
         rc_col.setContentsMargins(0, 0, 0, 0)
 
-        # Build 4 paired rows
-        for i, ((lf_lbl, lf_fld, lf_clr), (rc_lbl, rc_fld, rc_clr)) in enumerate(zip(_LF, _RC)):
-            # LF plot (no bottom axis)
+        for (lf_lbl, lf_fld, lf_clr), (rc_lbl, rc_fld, rc_clr) in zip(_LF, _RC):
+            # ── LF plot row: [plot  ☐] ──────────────────────────────────
             lf_pw = self._make_plot(_PLOT_H, y_lf=True, show_x=False)
             lf_c  = lf_pw.plot([], [], pen=pg.mkPen(lf_clr, width=1.5))
             self._lf_curves[lf_fld] = lf_c
             self._lf_plots.append(lf_pw)
             self._all_plots.append(lf_pw)
-            lf_col.addWidget(lf_pw)
             _set_axis_label(lf_pw, lf_lbl, lf_clr, side="left",
                             ticks=[(1, "1"), (0, "0"), (-1, "-1")])
 
-            # RC overlay curve on this LF plot (hidden by default)
             rc_m = lf_pw.plot([], [],
                               pen=pg.mkPen(rc_clr, width=1.5, style=Qt.PenStyle.DashLine),
                               name=rc_lbl)
             rc_m.setVisible(False)
             self._rc_merged[rc_fld] = rc_m
 
-            # RC plot
+            lf_inv = self._make_inv_checkbox(f"Invert {lf_lbl} (display only)")
+            self._lf_inv[lf_fld] = lf_inv
+
+            lf_row = QWidget()
+            lf_row.setFixedHeight(_PLOT_H)
+            lf_rl = QHBoxLayout(lf_row)
+            lf_rl.setContentsMargins(0, 0, 0, 0)
+            lf_rl.setSpacing(2)
+            lf_rl.addWidget(lf_pw, stretch=1)
+            lf_rl.addWidget(lf_inv)
+            lf_col.addWidget(lf_row)
+
+            # ── RC plot row: [☐  plot] ──────────────────────────────────
             rc_pw = self._make_plot(_PLOT_H, y_lf=False, show_x=False)
             rc_c  = rc_pw.plot([], [], pen=pg.mkPen(rc_clr, width=1.5))
             self._rc_curves[rc_fld] = rc_c
             self._rc_plots.append(rc_pw)
             self._all_plots.append(rc_pw)
-            rc_col.addWidget(rc_pw)
             _set_axis_label(rc_pw, rc_lbl, rc_clr, side="left",
                             ticks=[(2000, "2k"), (1500, "ctr"), (1000, "1k")])
+
+            rc_inv = self._make_inv_checkbox(f"Invert {rc_lbl} (display only)")
+            self._rc_inv[rc_fld] = rc_inv
+
+            rc_row = QWidget()
+            rc_row.setFixedHeight(_PLOT_H)
+            rc_rl = QHBoxLayout(rc_row)
+            rc_rl.setContentsMargins(0, 0, 0, 0)
+            rc_rl.setSpacing(2)
+            rc_rl.addWidget(rc_inv)
+            rc_rl.addWidget(rc_pw, stretch=1)
+            rc_col.addWidget(rc_row)
 
         pairs_row.addLayout(lf_col, stretch=1)
         pairs_row.addWidget(self._rc_col_widget, stretch=1)
         root.addLayout(pairs_row)
 
-        # ── Row 2: Combined plot (full width, bottom axis visible) ───────
+        # ── Row 2: Combined plot ─────────────────────────────────────────
         self._comb_pw = self._make_plot(_PLOT_H + 10, y_lf=True, show_x=True)
         for _, fld, clr in _LF:
             self._comb_lf[fld] = self._comb_pw.plot([], [], pen=pg.mkPen(clr, width=1.2))
@@ -159,7 +183,7 @@ class StickGraphsWidget(QWidget):
         ab.setTextPen(pg.mkPen(theme.DIM))
         root.addWidget(self._comb_pw)
 
-        # ── Row 3: Switch indicators (full width) ────────────────────────
+        # ── Row 3: Switch indicators ─────────────────────────────────────
         sw_row = QHBoxLayout()
         sw_row.setSpacing(8)
         sw_row.setContentsMargins(4, 2, 4, 2)
@@ -179,6 +203,9 @@ class StickGraphsWidget(QWidget):
             sw_row.addLayout(cell)
             self._sw_dots[ch] = dot
         root.addLayout(sw_row)
+
+        # ── Restore persisted invert state ───────────────────────────────
+        self.set_invert_state(ui_settings.load().get("invert", {}))
 
     # ── public ─────────────────────────────────────────────────────────────
 
@@ -214,12 +241,42 @@ class StickGraphsWidget(QWidget):
         self._redraw()
         self._update_switches()
 
+    # ── invert API ─────────────────────────────────────────────────────────
+
+    def get_invert_state(self) -> dict:
+        return {
+            "lf": {fld: chk.isChecked() for fld, chk in self._lf_inv.items()},
+            "rc": {fld: chk.isChecked() for fld, chk in self._rc_inv.items()},
+        }
+
+    def set_invert_state(self, state: dict) -> None:
+        lf = state.get("lf", {})
+        rc = state.get("rc", {})
+        for fld, chk in self._lf_inv.items():
+            chk.blockSignals(True)
+            chk.setChecked(bool(lf.get(fld, False)))
+            chk.blockSignals(False)
+        for fld, chk in self._rc_inv.items():
+            chk.blockSignals(True)
+            chk.setChecked(bool(rc.get(fld, False)))
+            chk.blockSignals(False)
+        self._redraw()
+
     # ── internal ───────────────────────────────────────────────────────────
+
+    def _make_inv_checkbox(self, tooltip: str) -> QCheckBox:
+        chk = QCheckBox()
+        chk.setToolTip(tooltip)
+        chk.setFixedWidth(18)
+        chk.stateChanged.connect(self._on_invert_changed)
+        return chk
+
+    def _on_invert_changed(self) -> None:
+        self._redraw()
+        ui_settings.update("invert", self.get_invert_state())
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        # Re-apply xRange after any geometry change (fullscreen, monitor change)
-        # so pyqtgraph doesn't reset or auto-scale the viewport.
         self._redraw()
 
     def _throttled_redraw(self) -> None:
@@ -245,7 +302,6 @@ class StickGraphsWidget(QWidget):
 
     def _redraw(self) -> None:
         # ── Single reference time for both sources ────────────────────────
-        # Use _t_zero if set; otherwise fall back to earliest available sample.
         t0 = self._t_zero
         if t0 <= 0:
             candidates = []
@@ -253,7 +309,7 @@ class StickGraphsWidget(QWidget):
             if self._rc_ts: candidates.append(self._rc_ts[0])
             t0 = min(candidates) if candidates else 0.0
 
-        # ── Unified time window (latest timestamp across both sources) ────
+        # ── Unified time window ───────────────────────────────────────────
         t_now = 0.0
         if self._ts:
             t_now = max(t_now, self._ts[-1] - t0)
@@ -273,6 +329,8 @@ class StickGraphsWidget(QWidget):
             t_plt  = t_abs[mask]
             for _, fld, _ in _LF:
                 d = np.array(self._buf[fld])[mask]
+                if self._lf_inv[fld].isChecked():
+                    d = -d
                 self._lf_curves[fld].setData(t_plt, d)
                 self._comb_lf[fld].setData(t_plt, d)
         else:
@@ -286,11 +344,16 @@ class StickGraphsWidget(QWidget):
             rc_mask = rc_t >= x_lo
             rc_plt  = rc_t[rc_mask]
             for _, fld, _ in _RC:
-                raw    = np.array(self._rc_buf[fld])[rc_mask]
+                raw = np.array(self._rc_buf[fld])[rc_mask]
+                if self._rc_inv[fld].isChecked():
+                    # Mirror around center (1500 → 1500, 1000 ↔ 2000)
+                    raw = 2 * _RC_CENTER - raw
                 self._rc_curves[fld].setData(rc_plt, raw)
                 normed = (raw - _RC_CENTER) / _RC_HALF
-                self._rc_merged[fld].setData(rc_plt if self._merged else [], normed if self._merged else [])
-                self._comb_rc[fld].setData(rc_plt if self._merged else [], normed if self._merged else [])
+                self._rc_merged[fld].setData(rc_plt if self._merged else [],
+                                             normed if self._merged else [])
+                self._comb_rc[fld].setData(rc_plt if self._merged else [],
+                                           normed if self._merged else [])
         else:
             for c in (list(self._rc_curves.values()) +
                       list(self._rc_merged.values()) +

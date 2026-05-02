@@ -227,8 +227,8 @@ def _list_dshow_video_devices() -> list[str]:
             except IndexError:
                 pass
 
-    saved_level = av.logging.get_log_level()
-    av.logging.set_log_level(av.logging.INFO)
+    saved_level = av.logging.get_level()
+    av.logging.set_level(av.logging.INFO)
     av.logging.set_log_callback(_cb)
     try:
         av.open("dummy", format="dshow", options={"list_devices": "true"})
@@ -236,7 +236,7 @@ def _list_dshow_video_devices() -> list[str]:
         pass
     finally:
         av.logging.set_log_callback(None)
-        av.logging.set_log_level(saved_level)
+        av.logging.set_level(saved_level)
 
     return names
 

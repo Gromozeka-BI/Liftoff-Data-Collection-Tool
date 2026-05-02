@@ -1,0 +1,7 @@
+{
+  "id": "hdzero_nano_v2",
+  "name": "HDZero Nano V2",
+  "angle_deg": 45,
+  "fov_deg": 155,
+  "resolution": [ 1280, 720 ]
+}

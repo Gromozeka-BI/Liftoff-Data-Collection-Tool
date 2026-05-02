@@ -14,3 +14,7 @@ Requires-Dist: opencv-python-headless>=4.9
 Requires-Dist: numpy>=1.26
 Requires-Dist: rich>=13.7
 Requires-Dist: pygetwindow>=0.0.9; sys_platform == "win32"
+Requires-Dist: PyQt6>=6.6
+Requires-Dist: pyqtgraph>=0.13
+Requires-Dist: keyboard>=0.13; sys_platform == "win32"
+Requires-Dist: pyserial>=3.5

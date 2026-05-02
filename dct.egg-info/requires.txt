@@ -8,6 +8,10 @@ mss>=9.0
 opencv-python-headless>=4.9
 numpy>=1.26
 rich>=13.7
+PyQt6>=6.6
+pyqtgraph>=0.13
+pyserial>=3.5
 
 [:sys_platform == "win32"]
 pygetwindow>=0.0.9
+keyboard>=0.13

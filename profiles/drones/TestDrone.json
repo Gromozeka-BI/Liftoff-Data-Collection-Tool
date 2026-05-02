@@ -1,0 +1,7 @@
+{
+  "id": "TestDrone",
+  "name": "TestDrone",
+  "motor_kv": 2200,
+  "weight_g": 550,
+  "prop": "Gemfan 5129"
+}

@@ -249,6 +249,21 @@ class CaptureDeviceRecorder:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._target_w)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._target_h)
             cap.set(cv2.CAP_PROP_FPS, self._fps)
+            # Keep the internal DirectShow buffer minimal so cap.read() always
+            # returns the most recent frame without stale-queue delay.
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            # Log what the driver actually agreed to (may differ from what we asked).
+            actual_fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+            actual_fourcc = "".join(chr((actual_fourcc_int >> (8 * i)) & 0xFF) for i in range(4))
+            actual_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            _log.info(
+                "Capture device %d negotiated: %dx%d @ %.1f fps  fourcc=%s  (requested %dx%d @ %d fps MJPG)",
+                self._device_index, actual_w, actual_h, actual_fps, actual_fourcc,
+                self._target_w, self._target_h, self._fps,
+            )
 
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(
@@ -262,7 +277,10 @@ class CaptureDeviceRecorder:
             # This keeps the output file at correct real-time speed regardless of
             # actual device frame rate.
             t_start = time.monotonic()
-            frames_written_idx = 0  # total frames written to VideoWriter
+            frames_written_idx = 0  # total slots written to VideoWriter (includes duplicates)
+            captured_count = 0      # unique frames actually read from the device
+            _last_fps_log = t_start
+            _captured_at_last_log = 0
 
             while self._running:
                 ts_wall = time.time()
@@ -270,6 +288,21 @@ class CaptureDeviceRecorder:
                 if not ret:
                     _log.warning("Capture device %d: failed to read frame", self._device_index)
                     continue
+
+                captured_count += 1
+
+                # Log actual incoming FPS every 5 seconds so the user can see
+                # whether the device is truly delivering the requested rate.
+                now_log = time.monotonic()
+                if now_log - _last_fps_log >= 5.0:
+                    elapsed_log = now_log - _last_fps_log
+                    incoming_fps = (captured_count - _captured_at_last_log) / elapsed_log
+                    _log.info(
+                        "Capture device %d: incoming %.1f fps (unique)  written %d frames total (with dupes)",
+                        self._device_index, incoming_fps, self.frames_written,
+                    )
+                    _last_fps_log = now_log
+                    _captured_at_last_log = captured_count
 
                 if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
                     frame = cv2.resize(frame, (self._target_w, self._target_h))

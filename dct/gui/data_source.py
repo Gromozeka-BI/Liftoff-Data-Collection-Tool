@@ -20,7 +20,7 @@ from dct.rc_receiver import RCReceiver
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
 from dct.rh_simulator import RHSimulator
-from dct.screen_recorder import ScreenRecorder, CaptureDeviceRecorder
+from dct.screen_recorder import ScreenRecorder, CaptureDeviceRecorder, PyAvCaptureRecorder
 from dct.session import create_session, copy_track, load_track
 from dct.storage.writer import TelemetryWriter, EventsWriter, RCChannelsWriter, TimelineWriter
 from dct.system_logger import SystemLogger
@@ -183,7 +183,7 @@ class LiveDataSource(QObject):
         if not cfg.get("no_video"):
             vsrc = cfg.get("video_source") or {"type": "screen"}
             if vsrc.get("type") == "device":
-                self._recorder = CaptureDeviceRecorder(
+                self._recorder = PyAvCaptureRecorder(
                     self._session_dir / "video.mp4",
                     device_index=vsrc["index"],
                     fps=settings.screen_fps,

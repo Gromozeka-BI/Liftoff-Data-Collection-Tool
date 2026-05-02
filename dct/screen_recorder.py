@@ -36,6 +36,17 @@ _TIMESTAMPS_SCHEMA = pa.schema([
 ])
 
 
+def _write_timestamps(path: Path, timestamps: list[float]) -> None:
+    table = pa.table(
+        {
+            "frame_idx": pa.array(range(len(timestamps)), type=pa.int64()),
+            "ts_wall":   pa.array(timestamps, type=pa.float64()),
+        },
+        schema=_TIMESTAMPS_SCHEMA,
+    )
+    pq.write_table(table, path, compression="snappy")
+
+
 def _get_window_region(title: str) -> dict[str, int] | None:
     if sys.platform == "win32":
         try:
@@ -154,7 +165,7 @@ class ScreenRecorder:
                         time.sleep(sleep)
 
             writer.release()
-            self._save_timestamps(frame_timestamps)
+            _write_timestamps(self._ts_path, frame_timestamps)
 
             if len(frame_timestamps) > 1:
                 duration = frame_timestamps[-1] - frame_timestamps[0]
@@ -164,16 +175,6 @@ class ScreenRecorder:
         except Exception as exc:
             self._error = exc
             _log.exception("Screen recorder crashed: %s", exc)
-
-    def _save_timestamps(self, timestamps: list[float]) -> None:
-        table = pa.table(
-            {
-                "frame_idx": pa.array(range(len(timestamps)), type=pa.int64()),
-                "ts_wall":   pa.array(timestamps, type=pa.float64()),
-            },
-            schema=_TIMESTAMPS_SCHEMA,
-        )
-        pq.write_table(table, self._ts_path, compression="snappy")
 
     @property
     def has_error(self) -> bool:
@@ -341,7 +342,7 @@ class CaptureDeviceRecorder:
 
             cap.release()
             writer.release()
-            self._save_timestamps(frame_timestamps)
+            _write_timestamps(self._ts_path, frame_timestamps)
 
             if len(frame_timestamps) > 1:
                 duration = frame_timestamps[-1] - frame_timestamps[0]
@@ -352,15 +353,171 @@ class CaptureDeviceRecorder:
             self._error = exc
             _log.exception("Capture device recorder crashed: %s", exc)
 
-    def _save_timestamps(self, timestamps: list[float]) -> None:
-        table = pa.table(
-            {
-                "frame_idx": pa.array(range(len(timestamps)), type=pa.int64()),
-                "ts_wall":   pa.array(timestamps, type=pa.float64()),
-            },
-            schema=_TIMESTAMPS_SCHEMA,
-        )
-        pq.write_table(table, self._ts_path, compression="snappy")
+    @property
+    def has_error(self) -> bool:
+        return self._error is not None
+
+
+class PyAvCaptureRecorder:
+    """Records from a USB capture card using pyav (libav/ffmpeg bindings).
+
+    Opens the DirectShow device via libav's dshow demuxer which correctly
+    negotiates MJPEG format — achieving 30 FPS where OpenCV's backends fail.
+    Frames are timestamped per-frame for precise telemetry alignment.
+    """
+
+    def __init__(
+        self,
+        output_path: Path,
+        device_index: int,
+        fps: int = 30,
+        target_w: int = 1280,
+        target_h: int = 720,
+    ):
+        self._output = output_path
+        self._ts_path = output_path.parent / "video_timestamps.parquet"
+        self._device_index = device_index
+        self._fps = fps
+        self._target_w = target_w
+        self._target_h = target_h
+        self._thread: threading.Thread | None = None
+        self._running = False
+        self._in_container = None   # held so stop() can interrupt decode()
+        self.frames_written = 0
+        self.actual_fps: float = float(fps)
+        self._error: Exception | None = None
+        self.latest_frame_bgr: np.ndarray | None = None
+
+    def start(self) -> None:
+        self._running = True
+        self._thread = threading.Thread(target=self._record_loop, daemon=True)
+        self._thread.start()
+        _log.info("PyAv capture recorder started: device=%d %dx%d@%dfps → %s",
+                  self._device_index, self._target_w, self._target_h, self._fps,
+                  self._output.name)
+
+    def stop(self) -> None:
+        self._running = False
+        # Close the container from outside to unblock any pending decode() call.
+        c = self._in_container
+        if c is not None:
+            try:
+                c.close()
+            except Exception:
+                pass
+        if self._thread:
+            self._thread.join(timeout=30)
+        if self._error:
+            _log.error("PyAv capture recorder error: %s", self._error)
+        else:
+            _log.info("PyAv capture recorder stopped: %d frames @ %.1f fps",
+                      self.frames_written, self.actual_fps)
+
+    def _record_loop(self) -> None:
+        import av
+
+        base_opts = {
+            "video_size": f"{self._target_w}x{self._target_h}",
+            "framerate":  str(self._fps),
+        }
+        # Try MJPEG first (higher throughput over USB), then let the driver decide.
+        in_container = None
+        for extra in ({"vcodec": "mjpeg"}, {}):
+            try:
+                in_container = av.open(
+                    f"video=@{self._device_index}",
+                    format="dshow",
+                    options={**base_opts, **extra},
+                )
+                break
+            except av.AVError as e:
+                _log.debug("pyav dshow open attempt failed (extra=%s): %s", extra, e)
+
+        if in_container is None:
+            self._error = RuntimeError(
+                f"Cannot open capture device {self._device_index} via pyav/dshow"
+            )
+            _log.error(str(self._error))
+            return
+
+        self._in_container = in_container
+
+        try:
+            in_stream = in_container.streams.video[0]
+            codec_name = (
+                in_stream.codec_context.codec.name
+                if in_stream.codec_context and in_stream.codec_context.codec
+                else "unknown"
+            )
+            rate = float(in_stream.average_rate) if in_stream.average_rate else self._fps
+            _log.info(
+                "pyav device %d negotiated: %dx%d @ %.1f fps  codec=%s",
+                self._device_index,
+                in_stream.codec_context.width, in_stream.codec_context.height,
+                rate, codec_name,
+            )
+
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(
+                str(self._output), fourcc, self._fps, (self._target_w, self._target_h)
+            )
+            interval = 1.0 / self._fps
+            frame_timestamps: list[float] = []
+            t_start = time.monotonic()
+            frames_written_idx = 0
+            captured_count = 0
+            _last_fps_log = t_start
+            _captured_at_last_log = 0
+
+            for av_frame in in_container.decode(video=0):
+                if not self._running:
+                    break
+
+                ts_wall = time.time()
+                captured_count += 1
+
+                now_log = time.monotonic()
+                if now_log - _last_fps_log >= 5.0:
+                    incoming_fps = (captured_count - _captured_at_last_log) / (now_log - _last_fps_log)
+                    _log.info(
+                        "pyav device %d: incoming %.1f fps (unique)  written %d frames total",
+                        self._device_index, incoming_fps, self.frames_written,
+                    )
+                    _last_fps_log = now_log
+                    _captured_at_last_log = captured_count
+
+                bgr = av_frame.to_ndarray(format="bgr24")
+                if bgr.shape[1] != self._target_w or bgr.shape[0] != self._target_h:
+                    bgr = cv2.resize(bgr, (self._target_w, self._target_h))
+
+                self.latest_frame_bgr = bgr
+
+                now = time.monotonic()
+                frames_due = int((now - t_start) / interval) + 1
+                while frames_written_idx < frames_due:
+                    writer.write(bgr)
+                    frame_timestamps.append(ts_wall)
+                    self.frames_written += 1
+                    frames_written_idx += 1
+
+            writer.release()
+            _write_timestamps(self._ts_path, frame_timestamps)
+
+            if len(frame_timestamps) > 1:
+                duration = frame_timestamps[-1] - frame_timestamps[0]
+                if duration > 0:
+                    self.actual_fps = round(self.frames_written / duration, 1)
+
+        except Exception as exc:
+            if self._running:
+                self._error = exc
+                _log.exception("pyav capture recorder crashed: %s", exc)
+        finally:
+            try:
+                in_container.close()
+            except Exception:
+                pass
+            self._in_container = None
 
     @property
     def has_error(self) -> bool:

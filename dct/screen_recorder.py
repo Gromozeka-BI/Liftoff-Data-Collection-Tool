@@ -196,19 +196,72 @@ def _open_capture(device_index: int) -> cv2.VideoCapture:
     return cv2.VideoCapture(device_index, backend)
 
 
-def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
-    """Return list of (index, label) for available cv2 capture devices (excluding virtual).
+def _list_dshow_video_devices() -> list[str]:
+    """Return DirectShow video device friendly names in enumeration order.
 
-    Uses DSHOW for enumeration — DSHOW supports index-based device discovery on Windows.
-    MSMF uses different indices and cannot reliably enumerate by integer index.
+    Uses pyav's log callback: ffmpeg prints device names when opened with
+    list_devices=true. The order matches OpenCV DSHOW index enumeration.
     """
+    if sys.platform != "win32":
+        return []
+    try:
+        import av
+    except ImportError:
+        return []
+
+    names: list[str] = []
+    in_video_section = False
+
+    def _cb(level: int, component: str, message: str) -> None:
+        nonlocal in_video_section
+        msg = message.strip()
+        if "DirectShow video devices" in msg:
+            in_video_section = True
+        elif "DirectShow audio devices" in msg:
+            in_video_section = False
+        elif in_video_section and msg.startswith('"') and "Alternative name" not in msg:
+            try:
+                name = msg.split('"')[1]
+                if name:
+                    names.append(name)
+            except IndexError:
+                pass
+
+    saved_level = av.logging.get_log_level()
+    av.logging.set_log_level(av.logging.INFO)
+    av.logging.set_log_callback(_cb)
+    try:
+        av.open("dummy", format="dshow", options={"list_devices": "true"})
+    except Exception:
+        pass
+    finally:
+        av.logging.set_log_callback(None)
+        av.logging.set_log_level(saved_level)
+
+    return names
+
+
+def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
+    """Return list of (index, label) for available capture devices.
+
+    On Windows: uses pyav to get DirectShow friendly names (same enumeration
+    order as OpenCV DSHOW). Falls back to OpenCV DSHOW index scanning.
+    """
+    if sys.platform == "win32":
+        try:
+            dshow_names = _list_dshow_video_devices()
+            if dshow_names:
+                return [(i, name) for i, name in enumerate(dshow_names)]
+        except Exception:
+            pass
+
+    # Fallback: OpenCV index scan
     found = []
     scan_backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
     for i in range(max_index):
         cap = cv2.VideoCapture(i, scan_backend)
         if cap.isOpened():
-            name = cap.getBackendName()
-            found.append((i, f"Device {i} ({name})"))
+            found.append((i, f"Device {i}"))
             cap.release()
     return found
 
@@ -416,6 +469,21 @@ class PyAvCaptureRecorder:
     def _record_loop(self) -> None:
         import av
 
+        # Resolve device index → DirectShow friendly name.
+        # ffmpeg/libav dshow requires "video=<Device Name>", not index-based addressing.
+        dshow_names = _list_dshow_video_devices()
+        if self._device_index < len(dshow_names):
+            device_uri = f"video={dshow_names[self._device_index]}"
+        else:
+            self._error = RuntimeError(
+                f"Device index {self._device_index} not found via pyav dshow "
+                f"(found {len(dshow_names)} devices: {dshow_names})"
+            )
+            _log.error(str(self._error))
+            return
+
+        _log.info("pyav opening device: %s", device_uri)
+
         base_opts = {
             "video_size": f"{self._target_w}x{self._target_h}",
             "framerate":  str(self._fps),
@@ -425,17 +493,17 @@ class PyAvCaptureRecorder:
         for extra in ({"vcodec": "mjpeg"}, {}):
             try:
                 in_container = av.open(
-                    f"video=@{self._device_index}",
+                    device_uri,
                     format="dshow",
                     options={**base_opts, **extra},
                 )
                 break
-            except av.AVError as e:
+            except Exception as e:
                 _log.debug("pyav dshow open attempt failed (extra=%s): %s", extra, e)
 
         if in_container is None:
             self._error = RuntimeError(
-                f"Cannot open capture device {self._device_index} via pyav/dshow"
+                f"Cannot open capture device '{device_uri}' via pyav/dshow"
             )
             _log.error(str(self._error))
             return

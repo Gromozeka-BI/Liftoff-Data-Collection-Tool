@@ -243,17 +243,136 @@ def _list_dshow_video_devices() -> list[str]:
     return names
 
 
+def _list_camera_class_devices() -> list[str]:
+    """Return friendly names of Windows Camera-class UVC devices.
+
+    USB capture cards using the standard Microsoft UVC driver (usbvideo.inf)
+    register under the Windows Camera setup class
+    (ClassGuid = {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}) instead of the
+    classic DirectShow VideoInputDeviceCategory. This function scans
+    HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB for Camera-class entries so
+    that pyav/dshow can open them as 'video=<FriendlyName>'.
+
+    Only active (Status OK) instances are returned.
+    """
+    if sys.platform != "win32":
+        return []
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    CAMERA_CLASS_GUID = "{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}"
+    usb_root = r"SYSTEM\CurrentControlSet\Enum\USB"
+    names: list[str] = []
+    seen: set[str] = set()
+
+    try:
+        usb_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, usb_root)
+        vid_idx = 0
+        while True:
+            try:
+                vid_name = winreg.EnumKey(usb_key, vid_idx)
+                vid_key = winreg.OpenKey(usb_key, vid_name)
+                inst_idx = 0
+                while True:
+                    try:
+                        inst_name = winreg.EnumKey(vid_key, inst_idx)
+                        inst_key = winreg.OpenKey(vid_key, inst_name)
+                        try:
+                            class_guid, _ = winreg.QueryValueEx(inst_key, "ClassGUID")
+                            if class_guid.lower() == CAMERA_CLASS_GUID:
+                                try:
+                                    friendly, _ = winreg.QueryValueEx(inst_key, "FriendlyName")
+                                except OSError:
+                                    friendly = ""
+                                if not friendly:
+                                    try:
+                                        friendly, _ = winreg.QueryValueEx(inst_key, "DeviceDesc")
+                                    except OSError:
+                                        friendly = ""
+                                # Strip driver-store decoration (e.g. "@oem12.inf,..." prefix)
+                                if friendly and friendly.startswith("@"):
+                                    friendly = ""
+                                if friendly and friendly not in seen:
+                                    seen.add(friendly)
+                                    names.append(friendly)
+                        except OSError:
+                            pass
+                        finally:
+                            winreg.CloseKey(inst_key)
+                        inst_idx += 1
+                    except OSError:
+                        break
+                winreg.CloseKey(vid_key)
+                vid_idx += 1
+            except OSError:
+                break
+        winreg.CloseKey(usb_key)
+    except Exception as exc:
+        _log.debug("Camera class registry enumeration failed: %s", exc)
+
+    _log.debug("Camera class devices: %s", names)
+    return names
+
+
+def list_all_video_device_names() -> list[str]:
+    """Return all capturable video device names: DirectShow + Camera-class UVC.
+
+    Used by PyAvCaptureRecorder to resolve a device index to a
+    'video=<FriendlyName>' URI for libav dshow.  Virtual devices (OBS etc.)
+    appear first (from DirectShow registry), followed by UVC hardware devices
+    (from Camera class registry).
+    """
+    dshow = _list_dshow_video_devices()
+    camera = _list_camera_class_devices()
+    # Merge: avoid duplicates (some devices register in both places).
+    seen = set(dshow)
+    for name in camera:
+        if name not in seen:
+            dshow.append(name)
+            seen.add(name)
+    return dshow
+
+
+# Known virtual / software DirectShow devices that libav dshow cannot open.
+_VIRTUAL_DEVICE_KEYWORDS = (
+    "obs virtual",
+    "virtual camera",
+    "vcam",
+    "ndi",
+    "snap camera",
+    "droidcam",
+    "iriun",
+    "epoccam",
+    "camo",
+    "reincubate",
+)
+
+
+def is_virtual_device(name: str) -> bool:
+    """Return True if the device friendly name indicates a software/virtual camera.
+
+    libav/dshow can only open real hardware devices; virtual cameras must be
+    captured via OpenCV (CaptureDeviceRecorder) instead of PyAvCaptureRecorder.
+    """
+    lname = name.lower()
+    return any(kw in lname for kw in _VIRTUAL_DEVICE_KEYWORDS)
+
+
 def scan_video_devices(max_index: int = 6) -> list[tuple[int, str]]:
     """Return list of (index, label) for available capture devices.
 
-    On Windows: uses pyav to get DirectShow friendly names (same enumeration
-    order as OpenCV DSHOW). Falls back to OpenCV DSHOW index scanning.
+    On Windows: merges DirectShow VideoInputDeviceCategory devices (virtual
+    cameras, webcams) with Windows Camera-class UVC devices (capture cards
+    using usbvideo.inf).  Falls back to OpenCV DSHOW index scanning when
+    neither registry source yields any results.
     """
     if sys.platform == "win32":
         try:
-            dshow_names = _list_dshow_video_devices()
-            if dshow_names:
-                return [(i, name) for i, name in enumerate(dshow_names)]
+            all_names = list_all_video_device_names()
+            if all_names:
+                return [(i, name) for i, name in enumerate(all_names)]
         except Exception:
             pass
 
@@ -473,16 +592,17 @@ class PyAvCaptureRecorder:
 
         # Resolve device index → DirectShow friendly name.
         # ffmpeg/libav dshow requires "video=<Device Name>", not index-based addressing.
-        dshow_names = _list_dshow_video_devices()
-        if self._device_index < len(dshow_names):
-            device_uri = f"video={dshow_names[self._device_index]}"
+        # We check both DirectShow VideoInputDeviceCategory (virtual/software cameras)
+        # and Windows Camera-class UVC devices (hardware capture cards with usbvideo.inf).
+        all_names = list_all_video_device_names()
+        if self._device_index < len(all_names):
+            device_uri = f"video={all_names[self._device_index]}"
         else:
-            # pyav device enumeration failed — fall back to OpenCV capture.
-            # Video will record at the device's native FPS (may be ~10fps on some cards).
+            # No device found by index — fall back to OpenCV capture.
             _log.warning(
-                "pyav dshow enumeration returned %d devices — "
+                "pyav enumeration returned %d devices (index %d requested) — "
                 "falling back to OpenCV CaptureDeviceRecorder",
-                len(dshow_names),
+                len(all_names), self._device_index,
             )
             self._record_loop_opencv()
             return
@@ -507,10 +627,11 @@ class PyAvCaptureRecorder:
                 _log.debug("pyav dshow open attempt failed (extra=%s): %s", extra, e)
 
         if in_container is None:
-            self._error = RuntimeError(
-                f"Cannot open capture device '{device_uri}' via pyav/dshow"
+            _log.warning(
+                "pyav/dshow failed to open '%s' — falling back to OpenCV CaptureDeviceRecorder",
+                device_uri,
             )
-            _log.error(str(self._error))
+            self._record_loop_opencv()
             return
 
         self._in_container = in_container
@@ -530,10 +651,17 @@ class PyAvCaptureRecorder:
                 rate, codec_name,
             )
 
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(
-                str(self._output), fourcc, self._fps, (self._target_w, self._target_h)
-            )
+            # Output container: encode as H.264 in MP4 via pyav.
+            # Using pyav encoder produces a proper MP4 file that Windows
+            # Media Player and all other players can open (unlike mp4v/cv2).
+            out_container = av.open(str(self._output), mode="w")
+            out_stream = out_container.add_stream("libx264", rate=self._fps)
+            out_stream.width  = self._target_w
+            out_stream.height = self._target_h
+            out_stream.pix_fmt = "yuv420p"
+            # CRF 23 — visually lossless at reasonable file size.
+            out_stream.options = {"crf": "23", "preset": "ultrafast"}
+
             interval = 1.0 / self._fps
             frame_timestamps: list[float] = []
             t_start = time.monotonic()
@@ -565,15 +693,27 @@ class PyAvCaptureRecorder:
 
                 self.latest_frame_bgr = bgr
 
+                # Determine how many output slots have elapsed in real time and
+                # write this frame to fill them (duplicate-frame padding keeps
+                # the file at correct playback speed even if capture drops).
                 now = time.monotonic()
                 frames_due = int((now - t_start) / interval) + 1
                 while frames_written_idx < frames_due:
-                    writer.write(bgr)
+                    # Convert BGR→YUV for the encoder.
+                    yuv_frame = av.VideoFrame.from_ndarray(
+                        cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), format="rgb24"
+                    )
+                    yuv_frame.pts = frames_written_idx
+                    for packet in out_stream.encode(yuv_frame):
+                        out_container.mux(packet)
                     frame_timestamps.append(ts_wall)
                     self.frames_written += 1
                     frames_written_idx += 1
 
-            writer.release()
+            # Flush encoder
+            for packet in out_stream.encode():
+                out_container.mux(packet)
+            out_container.close()
             _write_timestamps(self._ts_path, frame_timestamps)
 
             if len(frame_timestamps) > 1:

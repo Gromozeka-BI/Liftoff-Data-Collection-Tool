@@ -37,14 +37,18 @@ class StreamingParquetWriter:
         self._writer: pq.ParquetWriter | None = None
         self._last_flush = time.monotonic()
         self.total_rows = 0
+        self._closed = False
         self._bg = threading.Thread(target=self._bg_flush, daemon=True)
         self._bg.start()
 
     def _bg_flush(self) -> None:
-        while True:
+        # If flush_interval <= 0, write() already flushes on every row — no bg loop needed.
+        if self._flush_interval <= 0:
+            return
+        while not self._closed:
             time.sleep(self._flush_interval / 2)
             with self._lock:
-                if time.monotonic() - self._last_flush >= self._flush_interval:
+                if not self._closed and time.monotonic() - self._last_flush >= self._flush_interval:
                     self._flush_locked()
 
     def _open(self) -> None:
@@ -90,8 +94,9 @@ class StreamingParquetWriter:
             self._flush_locked()
 
     def close(self) -> None:
-        self.flush()
         with self._lock:
+            self._closed = True   # stop bg_flush BEFORE final flush to prevent re-open
+            self._flush_locked()
             if self._writer:
                 self._writer.close()
                 self._writer = None

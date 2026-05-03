@@ -20,7 +20,10 @@ from dct.rc_receiver import RCReceiver
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
 from dct.rh_simulator import RHSimulator
-from dct.screen_recorder import ScreenRecorder, CaptureDeviceRecorder, PyAvCaptureRecorder
+from dct.screen_recorder import (
+    ScreenRecorder, CaptureDeviceRecorder, PyAvCaptureRecorder,
+    list_all_video_device_names, is_virtual_device,
+)
 from dct.session import create_session, copy_track, load_track
 from dct.storage.writer import TelemetryWriter, EventsWriter, RCChannelsWriter, TimelineWriter
 from dct.system_logger import SystemLogger
@@ -60,32 +63,89 @@ class _StopThread(QThread):
         from dct.session import finalize_meta
         from dct.validator import validate_session
 
-        if self._udp:     self._udp.stop()
-        if self._rh_sim:  self._rh_sim.stop()
-        if self._recorder:
-            self._recorder.stop()
-            self._stats["frames"] = self._recorder.frames_written
-        if self._api:     self._api.stop()
-        if self._rc_recv: self._rc_recv.stop()
-        if self._tw:      self._tw.close()
-        if self._rc_tw:   self._rc_tw.close()
-        if self._tl_tw:   self._tl_tw.close()
-        if self._ew:
-            self._ew.write_event("session_stop", time.time(), source="dct")
-            self._ew.close()
-        if self._syslog:  self._syslog.close()
+        # Stop all components; each step is guarded so one failure doesn't
+        # prevent subsequent steps (especially writer.close calls).
+        try:
+            if self._udp:     self._udp.stop()
+        except Exception as e:
+            _log.error("Error stopping UDP: %s", e)
+        try:
+            if self._rh_sim:  self._rh_sim.stop()
+        except Exception as e:
+            _log.error("Error stopping RH sim: %s", e)
+        try:
+            if self._recorder:
+                self._recorder.stop()
+                self._stats["frames"] = self._recorder.frames_written
+        except Exception as e:
+            _log.error("Error stopping recorder: %s", e)
+        try:
+            if self._api:     self._api.stop()
+        except Exception as e:
+            _log.error("Error stopping API: %s", e)
+        try:
+            if self._rc_recv: self._rc_recv.stop()
+        except Exception as e:
+            _log.error("Error stopping RC receiver: %s", e)
+        try:
+            if self._tw:      self._tw.close()
+        except Exception as e:
+            _log.error("Error closing telemetry writer: %s", e)
+        try:
+            if self._rc_tw:   self._rc_tw.close()
+        except Exception as e:
+            _log.error("Error closing RC writer: %s", e)
+        try:
+            if self._tl_tw:   self._tl_tw.close()
+        except Exception as e:
+            _log.error("Error closing timeline writer: %s", e)
+        try:
+            if self._ew:
+                self._ew.write_event("session_stop", time.time(), source="dct")
+                self._ew.close()
+        except Exception as e:
+            _log.error("Error closing events writer: %s", e)
+        try:
+            if self._syslog:  self._syslog.close()
+        except Exception as e:
+            _log.error("Error closing syslog: %s", e)
 
         if self._session_dir:
-            finalize_meta(self._session_dir, self._stats["packets"],
-                          self._stats["laps"], self._start_time)
-            result = validate_session(self._session_dir, self._ds_mode)
+            try:
+                finalize_meta(self._session_dir, self._stats["packets"],
+                              self._stats["laps"], self._start_time)
+            except Exception as e:
+                _log.error("Error finalizing meta: %s", e)
 
-            if result.stats.get("gates_passed", 0) < 1 and not result.stats.get("rc_valid"):
+            result = None
+            try:
+                result = validate_session(self._session_dir, self._ds_mode)
+            except Exception as e:
+                _log.error("Validation crashed for %s: %s", self._session_dir, e)
+
+            # Only delete sessions that have no data at all (empty directory).
+            # If validation crashed (corrupt file, etc.) we keep the session so
+            # the user doesn't lose data.  If validation passed but found no
+            # useful content, still delete (zero packets and no RC activity).
+            should_delete = False
+            if result is not None:
+                no_gates   = result.stats.get("gates_passed", 0) < 1
+                no_rc      = not result.stats.get("rc_valid")
+                no_packets = result.stats.get("rc_packets", 0) == 0 and self._stats.get("packets", 0) == 0
+                should_delete = no_gates and no_rc and no_packets
+
+            if should_delete:
                 _log.warning("No valid data — deleting session %s", self._session_dir)
-                try:
-                    shutil.rmtree(self._session_dir)
-                except Exception as e:
-                    _log.error("Failed to delete session: %s", e)
+                deleted = False
+                for _attempt in range(5):
+                    try:
+                        shutil.rmtree(self._session_dir)
+                        deleted = True
+                        break
+                    except Exception:
+                        time.sleep(0.3)
+                if not deleted:
+                    _log.error("Failed to delete session after retries: %s", self._session_dir)
 
             self.result_ready.emit({
                 "session_dir": str(self._session_dir),
@@ -183,13 +243,30 @@ class LiveDataSource(QObject):
         if not cfg.get("no_video"):
             vsrc = cfg.get("video_source") or {"type": "screen"}
             if vsrc.get("type") == "device":
-                self._recorder = PyAvCaptureRecorder(
-                    self._session_dir / "video.mp4",
-                    device_index=vsrc["index"],
-                    fps=settings.screen_fps,
-                    target_w=settings.screen_width,
-                    target_h=settings.screen_height,
-                )
+                dev_idx = vsrc["index"]
+                # Detect virtual cameras: libav/dshow cannot open them, use OpenCV instead.
+                all_names = list_all_video_device_names()
+                dev_name = all_names[dev_idx] if dev_idx < len(all_names) else ""
+                if dev_name and is_virtual_device(dev_name):
+                    _log.info(
+                        "Device '%s' is a virtual camera — using OpenCV CaptureDeviceRecorder",
+                        dev_name,
+                    )
+                    self._recorder = CaptureDeviceRecorder(
+                        self._session_dir / "video.mp4",
+                        device_index=dev_idx,
+                        fps=settings.screen_fps,
+                        target_w=settings.screen_width,
+                        target_h=settings.screen_height,
+                    )
+                else:
+                    self._recorder = PyAvCaptureRecorder(
+                        self._session_dir / "video.mp4",
+                        device_index=dev_idx,
+                        fps=settings.screen_fps,
+                        target_w=settings.screen_width,
+                        target_h=settings.screen_height,
+                    )
             else:
                 self._recorder = ScreenRecorder(
                     self._session_dir / "video.mp4",

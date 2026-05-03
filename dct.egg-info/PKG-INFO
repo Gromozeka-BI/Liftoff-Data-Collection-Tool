@@ -18,3 +18,4 @@ Requires-Dist: PyQt6>=6.6
 Requires-Dist: pyqtgraph>=0.13
 Requires-Dist: keyboard>=0.13; sys_platform == "win32"
 Requires-Dist: pyserial>=3.5
+Requires-Dist: av>=12.0

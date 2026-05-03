@@ -20,7 +20,7 @@
   "track": "FGDR Track_1 LZ",
   "ds_mode": "rc",
   "com_port": "COM3",
-  "video_source_index": 0,
+  "video_source_index": 1,
   "sessions_dir": "C:/Users/Gromozeka/source/repos/Gromozeka-BI/Liftoff-Data-Collection-Tool/session",
   "replay_dir": "C:/Users/Gromozeka/source/repos/Gromozeka-BI/Liftoff-Data-Collection-Tool/session"
 }

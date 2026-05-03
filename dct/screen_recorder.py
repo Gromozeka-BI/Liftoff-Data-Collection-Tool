@@ -422,7 +422,7 @@ class CaptureDeviceRecorder:
     def stop(self) -> None:
         self._running = False
         if self._thread:
-            self._thread.join(timeout=30)
+            self._thread.join(timeout=5)
         if self._error:
             _log.error("Capture device recorder error: %s", self._error)
         else:
@@ -533,255 +533,244 @@ class CaptureDeviceRecorder:
 
 
 class PyAvCaptureRecorder:
-    """Records from a USB capture card using pyav (libav/ffmpeg bindings).
-
-    Opens the DirectShow device via libav's dshow demuxer which correctly
-    negotiates MJPEG format — achieving 30 FPS where OpenCV's backends fail.
-    Frames are timestamped per-frame for precise telemetry alignment.
-    """
-
-    def __init__(
-        self,
-        output_path: Path,
-        device_index: int,
-        fps: int = 30,
-        target_w: int = 1280,
-        target_h: int = 720,
-    ):
+    def __init__(self, output_path: Path, device_index: int, fps: int = 30, target_w: int = 1280, target_h: int = 720):
         self._output = output_path
         self._ts_path = output_path.parent / "video_timestamps.parquet"
         self._device_index = device_index
+        self._device_name = None
         self._fps = fps
         self._target_w = target_w
         self._target_h = target_h
-        self._thread: threading.Thread | None = None
+        self._process = None
         self._running = False
-        self._in_container = None   # held so stop() can interrupt decode()
         self.frames_written = 0
         self.actual_fps: float = float(fps)
         self._error: Exception | None = None
-        self.latest_frame_bgr: np.ndarray | None = None
+        self.latest_frame_bgr: np.ndarray | None = None  # Для GUI
+        self._frames_queue = None
+        self._preview_queue = None  # Новая очередь для кадров предпросмотра
 
     def start(self) -> None:
+        """Start the recording process."""
         self._running = True
-        self._thread = threading.Thread(target=self._record_loop, daemon=True)
-        self._thread.start()
-        _log.info("PyAv capture recorder started: device=%d %dx%d@%dfps → %s",
-                  self._device_index, self._target_w, self._target_h, self._fps,
-                  self._output.name)
-
-    def stop(self) -> None:
-        self._running = False
-        # Close the container from outside to unblock any pending decode() call.
-        c = self._in_container
-        if c is not None:
-            try:
-                c.close()
-            except Exception:
-                pass
-        if self._thread:
-            self._thread.join(timeout=30)
-        if self._error:
-            _log.error("PyAv capture recorder error: %s", self._error)
-        else:
-            _log.info("PyAv capture recorder stopped: %d frames @ %.1f fps",
-                      self.frames_written, self.actual_fps)
-
-    def _record_loop(self) -> None:
-        import av
-
-        # Resolve device index → DirectShow friendly name.
-        # ffmpeg/libav dshow requires "video=<Device Name>", not index-based addressing.
-        # We check both DirectShow VideoInputDeviceCategory (virtual/software cameras)
-        # and Windows Camera-class UVC devices (hardware capture cards with usbvideo.inf).
+        import multiprocessing as mp
+        
         all_names = list_all_video_device_names()
         if self._device_index < len(all_names):
-            device_uri = f"video={all_names[self._device_index]}"
+            self._device_name = all_names[self._device_index]
         else:
-            # No device found by index — fall back to OpenCV capture.
-            _log.warning(
-                "pyav enumeration returned %d devices (index %d requested) — "
-                "falling back to OpenCV CaptureDeviceRecorder",
-                len(all_names), self._device_index,
-            )
-            self._record_loop_opencv()
+            _log.error("Device index %d not found in device list", self._device_index)
+            self._error = RuntimeError(f"Device index {self._device_index} not found")
             return
-
-        _log.info("pyav opening device: %s", device_uri)
-
-        base_opts = {
-            "video_size": f"{self._target_w}x{self._target_h}",
-            "framerate":  str(self._fps),
-        }
-        # Try MJPEG first (higher throughput over USB), then let the driver decide.
-        in_container = None
-        for extra in ({"vcodec": "mjpeg"}, {}):
+        
+        _log.info("Using device: %s (index %d)", self._device_name, self._device_index)
+        
+        self._frames_queue = mp.Queue()
+        self._preview_queue = mp.Queue()  # Для кадров предпросмотра
+        
+        self._process = mp.Process(target=self._record_process, args=(
+            self._output, self._ts_path, self._device_name,
+            self._fps, self._target_w, self._target_h,
+            self._frames_queue, self._preview_queue
+        ))
+        self._process.start()
+        _log.info("PyAv capture recorder started in separate process: device=%s %dx%d@%dfps → %s",
+                  self._device_name, self._target_w, self._target_h, self._fps, self._output.name)
+        
+        time.sleep(1.5)
+        
+        # Запускаем поток для получения кадров предпросмотра
+        self._start_preview_receiver()
+        
+        if not self._process.is_alive():
+            _log.error("Process died immediately after start")
             try:
-                in_container = av.open(
-                    device_uri,
-                    format="dshow",
-                    options={**base_opts, **extra},
-                )
-                break
+                while not self._frames_queue.empty():
+                    err = self._frames_queue.get_nowait()
+                    _log.error("Process error: %s", err)
+            except Exception:
+                pass
+            self._error = RuntimeError("Recording process failed to start")
+
+    def _start_preview_receiver(self) -> None:
+        """Запускает поток для получения кадров предпросмотра из процесса."""
+        import threading
+        
+        def receive_preview_frames():
+            while self._running:
+                try:
+                    # Ждём кадр с таймаутом
+                    frame_data = self._preview_queue.get(timeout=0.1)
+                    if frame_data is None:
+                        break
+                    # Обновляем последний кадр для GUI
+                    self.latest_frame_bgr = frame_data
+                except Exception:
+                    pass
+        
+        self._preview_thread = threading.Thread(target=receive_preview_frames, daemon=True)
+        self._preview_thread.start()
+
+    def stop(self) -> None:
+        """Stop the recording process gracefully."""
+        self._running = False
+        
+        if self._process:
+            _log.debug("Stopping PyAv recorder process gracefully...")
+            
+            # Проверяем, сколько кадров было записано
+            try:
+                frames_from_queue = 0
+                while not self._frames_queue.empty():
+                    msg = self._frames_queue.get_nowait()
+                    if "frames" in msg:
+                        frames_from_queue = msg["frames"]
+                if frames_from_queue > 0:
+                    self.frames_written = frames_from_queue
+                _log.debug("Frames written: %d", self.frames_written)
             except Exception as e:
-                _log.debug("pyav dshow open attempt failed (extra=%s): %s", extra, e)
+                _log.debug("Error reading from queue: %s", e)
+            
+            # Отправляем сигнал завершения
+            try:
+                self._frames_queue.put({"stop": True}, timeout=1)
+            except Exception:
+                pass
+            
+            # Ждём 3 секунды для корректного завершения
+            self._process.join(timeout=3)
+            
+            if self._process.is_alive():
+                _log.warning("Process still alive after 3s, terminating...")
+                self._process.terminate()
+                self._process.join(timeout=2)
+                
+                if self._process.is_alive():
+                    _log.warning("Process still alive, killing...")
+                    self._process.kill()
+                    self._process.join()
+            
+            self._process = None
+        
+        if self.frames_written > 0:
+            _log.info("PyAv capture recorder stopped: %d frames", self.frames_written)
+        else:
+            _log.warning("PyAv capture recorder stopped with 0 frames - check device availability")
 
-        if in_container is None:
-            _log.warning(
-                "pyav/dshow failed to open '%s' — falling back to OpenCV CaptureDeviceRecorder",
-                device_uri,
-            )
-            self._record_loop_opencv()
-            return
-
-        self._in_container = in_container
-
+    @staticmethod
+    def _record_process(
+        output_path: Path,
+        ts_path: Path,
+        device_name: str,
+        fps: int,
+        target_w: int,
+        target_h: int,
+        frames_queue,
+        preview_queue,  # Новая очередь для кадров предпросмотра
+    ) -> None:
+        """Run in a separate process - handles the actual recording."""
+        import av
+        import time
+        import sys
+        
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
         try:
-            in_stream = in_container.streams.video[0]
-            codec_name = (
-                in_stream.codec_context.codec.name
-                if in_stream.codec_context and in_stream.codec_context.codec
-                else "unknown"
+            device_uri = f"video={device_name}"
+            frames_queue.put({"status": f"opening {device_uri}"})
+            
+            in_container = av.open(
+                device_uri,
+                format="dshow",
+                options={
+                    "video_size": f"{target_w}x{target_h}",
+                    "framerate": str(fps),
+                    "vcodec": "mjpeg",
+                    "fflags": "nobuffer",
+                    "flags": "low_delay",
+                }
             )
-            rate = float(in_stream.average_rate) if in_stream.average_rate else self._fps
-            _log.info(
-                "pyav device %d negotiated: %dx%d @ %.1f fps  codec=%s",
-                self._device_index,
-                in_stream.codec_context.width, in_stream.codec_context.height,
-                rate, codec_name,
-            )
-
-            # Output container: encode as H.264 in MP4 via pyav.
-            # Using pyav encoder produces a proper MP4 file that Windows
-            # Media Player and all other players can open (unlike mp4v/cv2).
-            out_container = av.open(str(self._output), mode="w")
-            out_stream = out_container.add_stream("libx264", rate=self._fps)
-            out_stream.width  = self._target_w
-            out_stream.height = self._target_h
+            
+            frames_queue.put({"status": "device_opened"})
+            
+            out_container = av.open(str(output_path), mode="w")
+            out_stream = out_container.add_stream("libx264", rate=fps)
+            out_stream.width = target_w
+            out_stream.height = target_h
             out_stream.pix_fmt = "yuv420p"
-            # CRF 23 — visually lossless at reasonable file size.
-            out_stream.options = {"crf": "23", "preset": "ultrafast"}
-
-            interval = 1.0 / self._fps
+            out_stream.options = {
+                "crf": "23",
+                "preset": "ultrafast",
+                "movflags": "faststart",
+            }
+            
+            frames_queue.put({"status": "output_opened"})
+            
             frame_timestamps: list[float] = []
-            t_start = time.monotonic()
-            frames_written_idx = 0
-            captured_count = 0
-            _last_fps_log = t_start
-            _captured_at_last_log = 0
-
-            for av_frame in in_container.decode(video=0):
-                if not self._running:
+            frames_written = 0
+            stop_requested = False
+            
+            frames_queue.put({"status": "capturing"})
+            
+            for packet in in_container.demux(video=0):
+                try:
+                    if not frames_queue.empty():
+                        msg = frames_queue.get_nowait()
+                        if msg.get("stop"):
+                            stop_requested = True
+                            break
+                except Exception:
+                    pass
+                
+                if stop_requested:
                     break
-
-                ts_wall = time.time()
-                captured_count += 1
-
-                now_log = time.monotonic()
-                if now_log - _last_fps_log >= 5.0:
-                    incoming_fps = (captured_count - _captured_at_last_log) / (now_log - _last_fps_log)
-                    _log.info(
-                        "pyav device %d: incoming %.1f fps (unique)  written %d frames total",
-                        self._device_index, incoming_fps, self.frames_written,
-                    )
-                    _last_fps_log = now_log
-                    _captured_at_last_log = captured_count
-
-                bgr = av_frame.to_ndarray(format="bgr24")
-                if bgr.shape[1] != self._target_w or bgr.shape[0] != self._target_h:
-                    bgr = cv2.resize(bgr, (self._target_w, self._target_h))
-
-                self.latest_frame_bgr = bgr
-
-                # Determine how many output slots have elapsed in real time and
-                # write this frame to fill them (duplicate-frame padding keeps
-                # the file at correct playback speed even if capture drops).
-                now = time.monotonic()
-                frames_due = int((now - t_start) / interval) + 1
-                while frames_written_idx < frames_due:
-                    # Convert BGR→YUV for the encoder.
+                
+                for av_frame in packet.decode():
+                    frames_written += 1
+                    ts_wall = time.time()
+                    
+                    if frames_written % 30 == 0:
+                        frames_queue.put({"frames": frames_written})
+                    
+                    bgr = av_frame.to_ndarray(format="bgr24")
+                    if bgr.shape[1] != target_w or bgr.shape[0] != target_h:
+                        import cv2
+                        bgr = cv2.resize(bgr, (target_w, target_h))
+                    
+                    # Отправляем кадр для предпросмотра (уменьшенный для экономии)
+                    # Отправляем каждый 5-й кадр, чтобы не перегружать очередь
+                    if frames_written % 5 == 0:
+                        # Отправляем копию кадра
+                        preview_queue.put(bgr.copy())
+                    
+                    import cv2
                     yuv_frame = av.VideoFrame.from_ndarray(
                         cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), format="rgb24"
                     )
-                    yuv_frame.pts = frames_written_idx
-                    for packet in out_stream.encode(yuv_frame):
-                        out_container.mux(packet)
+                    yuv_frame.pts = frames_written
+                    
+                    for out_packet in out_stream.encode(yuv_frame):
+                        out_container.mux(out_packet)
+                    
                     frame_timestamps.append(ts_wall)
-                    self.frames_written += 1
-                    frames_written_idx += 1
-
+            
             # Flush encoder
             for packet in out_stream.encode():
                 out_container.mux(packet)
+            
             out_container.close()
-            _write_timestamps(self._ts_path, frame_timestamps)
-
-            if len(frame_timestamps) > 1:
-                duration = frame_timestamps[-1] - frame_timestamps[0]
-                if duration > 0:
-                    self.actual_fps = round(self.frames_written / duration, 1)
-
-        except Exception as exc:
-            if self._running:
-                self._error = exc
-                _log.exception("pyav capture recorder crashed: %s", exc)
-        finally:
-            try:
-                in_container.close()
-            except Exception:
-                pass
-            self._in_container = None
-
-    def _record_loop_opencv(self) -> None:
-        """Fallback path: record via OpenCV DSHOW when pyav device enumeration fails."""
-        _log.info("PyAv fallback: recording via OpenCV device=%d", self._device_index)
-        cap = _open_capture(self._device_index)
-        if not cap.isOpened():
-            self._error = RuntimeError(
-                f"OpenCV fallback: cannot open capture device {self._device_index}"
-            )
-            _log.error(str(self._error))
-            return
-
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._target_w)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._target_h)
-        cap.set(cv2.CAP_PROP_FPS, self._fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(
-            str(self._output), fourcc, self._fps, (self._target_w, self._target_h)
-        )
-        interval = 1.0 / self._fps
-        frame_timestamps: list[float] = []
-        t_start = time.monotonic()
-        frames_written_idx = 0
-
-        try:
-            while self._running:
-                ts_wall = time.time()
-                ret, frame = cap.read()
-                if not ret:
-                    continue
-                if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
-                    frame = cv2.resize(frame, (self._target_w, self._target_h))
-                self.latest_frame_bgr = frame
-                now = time.monotonic()
-                frames_due = int((now - t_start) / interval) + 1
-                while frames_written_idx < frames_due:
-                    writer.write(frame)
-                    frame_timestamps.append(ts_wall)
-                    self.frames_written += 1
-                    frames_written_idx += 1
-        finally:
-            cap.release()
-            writer.release()
-            _write_timestamps(self._ts_path, frame_timestamps)
-            if len(frame_timestamps) > 1:
-                duration = frame_timestamps[-1] - frame_timestamps[0]
-                if duration > 0:
-                    self.actual_fps = round(self.frames_written / duration, 1)
+            in_container.close()
+            
+            if frame_timestamps:
+                _write_timestamps(ts_path, frame_timestamps)
+                frames_queue.put({"frames": len(frame_timestamps), "finished": True})
+            else:
+                frames_queue.put({"error": "No timestamps collected"})
+                
+        except Exception as e:
+            frames_queue.put({"error": str(e)})
+            raise
 
     @property
     def has_error(self) -> bool:

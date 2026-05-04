@@ -156,7 +156,15 @@ class ScreenRecorder:
             )
             interval = 1.0 / self._fps
             frame_timestamps: list[float] = []
-            pts = 0
+
+            # pts_written tracks the next PTS slot to fill.  It advances by the
+            # number of slots actually written (including duplicates) so that the
+            # output file timeline always matches wall-clock time exactly.
+            pts_written = 0
+            t_start = time.monotonic()
+            last_frame: np.ndarray | None = None
+            _last_fps_log = t_start
+            _frames_at_last_log = 0
 
             with mss.mss() as sct:
                 region_cache: dict[str, int] | None = None
@@ -174,7 +182,7 @@ class ScreenRecorder:
                             _log.debug("Window region: %s", region_cache)
                     monitor = region_cache if region_cache is not None else sct.monitors[1]
 
-                    # Timestamp before grab() — closest to the game state in this frame.
+                    # Timestamp BEFORE grab — closest to the game state in this frame.
                     ts_wall = time.time()
                     img = np.array(sct.grab(monitor))
 
@@ -182,11 +190,35 @@ class ScreenRecorder:
                     if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
                         frame = cv2.resize(frame, (self._target_w, self._target_h))
 
-                    _av_write_frame(out_stream, out_container, frame, pts)
-                    pts += 1
                     self.latest_frame_bgr = frame
-                    frame_timestamps.append(ts_wall)
-                    self.frames_written += 1
+                    last_frame = frame
+
+                    # How many PTS slots should have been filled by now?
+                    # Using wall-clock keeps the video timeline locked to real time
+                    # even when encoding spikes cause individual frames to be late.
+                    now = time.monotonic()
+                    slots_due = int((now - t_start) / interval) + 1
+
+                    # Fill every slot since the last write with this frame.
+                    # If encoding is fast this is exactly 1.  If a spike caused us
+                    # to skip slots, we duplicate the current frame to fill the gap
+                    # so the video length stays proportional to real elapsed time.
+                    while pts_written < slots_due:
+                        _av_write_frame(out_stream, out_container, frame, pts_written)
+                        frame_timestamps.append(ts_wall)
+                        self.frames_written += 1
+                        pts_written += 1
+
+                    # Periodic FPS log
+                    if now - _last_fps_log >= 5.0:
+                        elapsed_log = now - _last_fps_log
+                        fps_log = (self.frames_written - _frames_at_last_log) / elapsed_log
+                        _log.info(
+                            "Screen recorder: %.1f fps  (written=%d  slots_due=%d)",
+                            fps_log, self.frames_written, slots_due,
+                        )
+                        _last_fps_log = now
+                        _frames_at_last_log = self.frames_written
 
                     elapsed = time.monotonic() - t0
                     sleep = interval - elapsed

@@ -136,6 +136,8 @@ class MainWindow(QMainWindow):
     def _switch_mode(self, mode: int) -> None:
         if mode == _MODE_REPLAY and self._live and getattr(self._live, '_recording', False):
             return
+        if mode == _MODE_RECORD and self._mode == _MODE_REPLAY:
+            self._rep_bar.deactivate()
         self._mode = mode
         self._btn_mode_rec.setChecked(mode == _MODE_RECORD)
         self._btn_mode_rep.setChecked(mode == _MODE_REPLAY)
@@ -190,6 +192,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(dict)
     def _on_start_session(self, cfg: dict) -> None:
+        # Guard: hotkeys are application-wide, ignore if not in Record mode
+        if self._mode != _MODE_RECORD:
+            return
         self._stop_preview()   # recorder takes over video
 
         track_path = cfg.get("track_path")
@@ -270,9 +275,9 @@ class MainWindow(QMainWindow):
         if not self._live or not self._current_track:
             return
         gates = self._current_track.get("gates", [])
-        sf    = next((g for g in gates if g.get("is_start_finish")), None)
+        sf = next((g for g in gates if g.get("is_start_finish")), None)
         if sf:
-            self._live.mark_gate(sf["id"])
+            self._live.mark_sf_lap(sf["id"])
 
     # ── replay bar ──────────────────────────────────────────────────────────
 
@@ -282,6 +287,9 @@ class MainWindow(QMainWindow):
         rb.play_pause.connect(self._on_replay_play_pause)
         rb.seek_fraction.connect(self._on_replay_seek)
         rb.speed_changed.connect(self._on_replay_speed)
+        rb.event_add_requested.connect(self._on_replay_event_add)
+        rb.event_delete_requested.connect(self._on_replay_event_delete)
+        rb.event_seek_requested.connect(self._on_replay_event_seek)
 
     @pyqtSlot(str)
     def _on_replay_session_selected(self, path: str) -> None:
@@ -290,7 +298,11 @@ class MainWindow(QMainWindow):
         track_file = p / "track.json"
         if track_file.exists():
             with open(track_file, encoding="utf-8") as f:
-                self._map.setup_track(json.load(f))
+                track_data = json.load(f)
+            self._map.setup_track(track_data)
+            self._current_track = track_data
+        else:
+            self._current_track = None
 
         if self._replay:
             self._replay.deleteLater()
@@ -314,6 +326,17 @@ class MainWindow(QMainWindow):
         self._replay = ReplayDataSource(p, self)
         if self._replay.first_ts > 0:
             self._graphs.set_time_zero(self._replay.first_ts)
+
+        # Wire event editor
+        self._replay.events_changed.connect(self._rep_bar.set_events)
+        # Set time range for event strip
+        t0 = self._replay.first_ts
+        t1 = t0 + self._replay.total_duration
+        self._rep_bar.set_session_time_range(t0, t1)
+        self._rep_bar.set_events(self._replay._events)
+        # Pass gates for gate pick dialog
+        if self._current_track:
+            self._rep_bar.set_gates(self._current_track.get("gates", []))
 
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
@@ -349,6 +372,27 @@ class MainWindow(QMainWindow):
     def _on_replay_speed(self, speed: float) -> None:
         if self._replay:
             self._replay.set_speed(speed)
+
+    @pyqtSlot(str, int)
+    def _on_replay_event_add(self, event_type: str, gate_id: int) -> None:
+        if not self._replay:
+            return
+        ts = self._replay.current_ts
+        self._replay.add_event(event_type, ts, gate_id=gate_id)
+
+    @pyqtSlot(dict)
+    def _on_replay_event_delete(self, ev: dict) -> None:
+        if not self._replay:
+            return
+        self._replay.delete_event(ev.get("seq", -1))
+
+    @pyqtSlot(float)
+    def _on_replay_event_seek(self, ts_wall: float) -> None:
+        if not self._replay:
+            return
+        self._replay.seek_to_ts(ts_wall)
+        self._map.clear_trail()
+        self._graphs.clear()
 
     def _replay_space(self) -> None:
         if self._mode == _MODE_REPLAY:

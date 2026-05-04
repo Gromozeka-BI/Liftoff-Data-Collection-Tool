@@ -329,6 +329,18 @@ class LiveDataSource(QObject):
             try: urllib.request.urlopen(req, timeout=1)
             except Exception: pass
 
+    def mark_sf_lap(self, gate_id: int) -> None:
+        """Simulate RotorHazard lap detection for the S/F gate (posts rh_lap)."""
+        if self._api:
+            import urllib.request, json
+            data = json.dumps({"gate_id": gate_id, "ts_wall": time.time()}).encode()
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{settings.api_port}/api/v1/rh/lap",
+                data=data, headers={"Content-Type": "application/json"},
+            )
+            try: urllib.request.urlopen(req, timeout=1)
+            except Exception: pass
+
     # ── internal ───────────────────────────────────────────────────────────
 
     def _on_rc_status(self, online: bool) -> None:
@@ -427,19 +439,23 @@ class ReplayDataSource(QObject):
     stats_updated     = pyqtSignal(dict)
     progress_updated  = pyqtSignal(float, float)
     finished          = pyqtSignal()
+    events_changed    = pyqtSignal(list)
 
     def __init__(self, session_dir: str | Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
         import pyarrow.parquet as pq
 
         p = Path(session_dir)
+        self._session_dir = p
 
         # ── Telemetry ─────────────────────────────────────────────────────
         telem_path = p / "telemetry.parquet"
         self._rows: list[dict] = (
             pq.read_table(telem_path).to_pylist() if telem_path.exists() else []
         )
-        ev_path = p / "events.parquet"
+        ev_path = p / "events_edited.parquet"
+        if not ev_path.exists():
+            ev_path = p / "events.parquet"
         self._events: list[dict] = (
             pq.read_table(ev_path).to_pylist() if ev_path.exists() else []
         )
@@ -522,6 +538,13 @@ class ReplayDataSource(QObject):
         self._paused = False
 
     def pause(self) -> None:
+        if not self._paused:
+            # Freeze current playback position into _sim_anchor so that
+            # current_ts (used by the event editor) stays accurate while paused.
+            self._sim_anchor = (
+                self._sim_anchor + (time.monotonic() - self._wall_anchor) * self._speed
+            )
+            self._wall_anchor = time.monotonic()
         self._paused = True
 
     def toggle_play(self) -> None:
@@ -620,6 +643,85 @@ class ReplayDataSource(QObject):
         frame = self._video_reader.get_latest()
         if frame is not None:
             self.video_frame.emit(frame)
+
+    @property
+    def current_ts(self) -> float:
+        """Current playback position as unix ts_wall."""
+        if self._paused or len(self._tl_ts) == 0:
+            return self._sim_anchor
+        return self._sim_anchor + (time.monotonic() - self._wall_anchor) * self._speed
+
+    def seek_to_ts(self, ts_wall: float) -> None:
+        """Seek to an absolute ts_wall position."""
+        if len(self._tl_ts) == 0:
+            return
+        t0, t1 = self._tl_ts[0], self._tl_ts[-1]
+        frac = (ts_wall - t0) / (t1 - t0) if t1 > t0 else 0.0
+        self.seek(max(0.0, min(1.0, frac)))
+
+    def _rebuild_event_arrays(self) -> None:
+        self._ev_ts_arr = (
+            np.array([e["ts_wall"] for e in self._events]) if self._events else np.array([])
+        )
+        self._lap_event_mask = np.array(
+            ["lap" in e.get("event_type", "") for e in self._events], dtype=bool
+        ) if self._events else np.array([], dtype=bool)
+
+    def add_event(
+        self,
+        event_type: str,
+        ts_wall: float,
+        gate_id: int = -1,
+        lap_num: int = -1,
+    ) -> None:
+        import bisect
+        new_seq = max((e.get("seq", 0) for e in self._events), default=0) + 1
+        ev = {
+            "seq":        new_seq,
+            "ts_wall":    ts_wall,
+            "event_type": event_type,
+            "gate_id":    gate_id,
+            "lap_num":    lap_num,
+            "source":     "edited",
+        }
+        ts_list = [e["ts_wall"] for e in self._events]
+        idx = bisect.bisect_left(ts_list, ts_wall)
+        self._events.insert(idx, ev)
+        # If inserted before playback cursor, advance _ev_idx to skip it
+        cur_ts = self.current_ts
+        if ts_wall <= cur_ts and idx < self._ev_idx:
+            self._ev_idx += 1
+        self._rebuild_event_arrays()
+        self.save_events()
+        self.events_changed.emit(list(self._events))
+
+    def delete_event(self, seq: int) -> None:
+        cur_ts = self.current_ts
+        for i, ev in enumerate(self._events):
+            if ev.get("seq") == seq:
+                if ev["ts_wall"] <= cur_ts and i < self._ev_idx:
+                    self._ev_idx = max(0, self._ev_idx - 1)
+                self._events.pop(i)
+                break
+        self._rebuild_event_arrays()
+        self.save_events()
+        self.events_changed.emit(list(self._events))
+
+    def save_events(self) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from dct.storage.schema import EVENTS_SCHEMA
+        path = self._session_dir / "events_edited.parquet"
+        rows: dict[str, list] = {f.name: [] for f in EVENTS_SCHEMA}
+        for ev in self._events:
+            for f in EVENTS_SCHEMA:
+                rows[f.name].append(ev.get(f.name))
+        table = pa.table(
+            {name: pa.array(vals, type=EVENTS_SCHEMA.field(name).type)
+             for name, vals in rows.items()},
+            schema=EVENTS_SCHEMA,
+        )
+        pq.write_table(table, path, compression="snappy")
 
     def deleteLater(self) -> None:
         if self._video_reader is not None:

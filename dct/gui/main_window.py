@@ -237,7 +237,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_stop_session(self) -> None:
         if self._live:
-            self._live.stop_session()
+            live, self._live = self._live, None   # clear immediately — prevents double stop from closeEvent
+            live.stop_session()
 
     @pyqtSlot()
     def _on_mark_lap(self) -> None:

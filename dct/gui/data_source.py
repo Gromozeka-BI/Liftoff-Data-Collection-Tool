@@ -293,6 +293,9 @@ class LiveDataSource(QObject):
         self.session_started.emit(str(self._session_dir))
 
     def stop_session(self) -> None:
+        if self._stop_thread is not None and self._stop_thread.isRunning():
+            _log.warning("stop_session() called while stop already in progress — ignoring")
+            return
         self._timer.stop()
         self._stop_thread = _StopThread(
             self._udp, self._rh_sim, self._recorder, self._api,

@@ -6,8 +6,7 @@
   - двухэтажные + два внутренних штыря у перекладины
 
 Нумерация:
-  - SF-ворота получают номер «0»
-  - остальные: 1, 2, 3, … в порядке gate_sequence
+  - бейдж показывает реальный id ворот из track.json
   - бейдж нижнего/одноэтажного этажа — красный (pink fill)
   - бейдж верхнего этажа — синий (blue fill)
   - позиция: снизу-слева от входа (левая стойка, входная сторона)
@@ -29,10 +28,20 @@ from dct.gui import theme
 
 _CLR_GATE    = "#0000CC"
 _CLR_GATE_SF = "#CC0000"
+_CLR_FLAG    = _CLR_GATE          # флаги — цвет ворот первого этажа
 
 # Бейдж: (fill, border)
-_BADGE_LOW  = ("#f8cecc", "#b85450")   # нижний этаж / одноэтажный
-_BADGE_HIGH = ("#dae8fc", "#6c8ebf")   # верхний этаж
+_BADGE_LOW    = ("#f8cecc", "#b85450")   # нижний этаж / одноэтажный
+_BADGE_HIGH   = ("#dae8fc", "#6c8ebf")   # верхний этаж
+_FILL_OFFSEQ  = "#949494"   # фон бейджа для элементов вне gate_sequence
+
+_FLAG_ARM   = 0.35   # длина короткого луча флага (м)
+_FLAG_TOP   = _FLAG_ARM * 2.0   # длина верхнего луча (вдвое длиннее)
+
+
+def _is_flag(gate: dict) -> bool:
+    """Флаг — элемент без поля size (нет размеров пролёта)."""
+    return "size" not in gate
 
 
 class BadgeItem(pg.GraphicsObject):
@@ -92,6 +101,48 @@ class BadgeItem(pg.GraphicsObject):
         p.restore()
 
 
+class WorldTextItem(pg.GraphicsObject):
+    """Текст в мировых координатах без фона, масштабируется как BadgeItem.
+    font_scale — множитель относительно размера бейджа (0.60 * pixel_size)."""
+
+    def __init__(self, text: str, color: str, size_meters: float = 0.4,
+                 font_scale: float = 0.60):
+        super().__init__()
+        self.text        = text
+        self._color      = QColor(color)
+        self._half       = size_meters / 2
+        self._rect       = QRectF(-self._half, -self._half, size_meters, size_meters)
+        self._font_scale = font_scale
+
+    def boundingRect(self):
+        return self._rect
+
+    def paint(self, p, *args):
+        t  = p.transform()
+        tl = t.map(QPointF(-self._half, -self._half))
+        br = t.map(QPointF( self._half,  self._half))
+
+        screen_w   = abs(br.x() - tl.x())
+        screen_h   = abs(br.y() - tl.y())
+        pixel_size = min(screen_w, screen_h)
+        if pixel_size < 4:
+            return
+
+        cx = (tl.x() + br.x()) / 2
+        cy = (tl.y() + br.y()) / 2
+
+        p.save()
+        p.setWorldTransform(QTransform())
+        font = QFont("Arial")
+        font.setBold(True)
+        font.setPixelSize(max(4, int(pixel_size * self._font_scale)))
+        p.setFont(font)
+        p.setPen(self._color)
+        screen_rect = QRectF(cx - screen_w / 2, cy - screen_h / 2, screen_w, screen_h)
+        p.drawText(screen_rect, Qt.AlignmentFlag.AlignCenter, self.text)
+        p.restore()
+
+
 class TrackMapWidget(pg.PlotWidget):
     TRAIL_SECS = 3.0
     TRAIL_MAX  = 400
@@ -145,6 +196,7 @@ class TrackMapWidget(pg.PlotWidget):
         gates    = track_data.get("gates", [])
         gate_map = {g["id"]: g for g in gates}
         seq      = track_data.get("gate_sequence", [g["id"] for g in gates])
+        seq_set  = set(seq)
         sf_id    = next((g["id"] for g in gates if g.get("is_start_finish")), None)
 
         sp     = track_data.get("start_point")
@@ -169,9 +221,12 @@ class TrackMapWidget(pg.PlotWidget):
                 same_dir_pairs.add(lo)
                 same_dir_pairs.add(hi)
 
-        # ── Формы ворот ──────────────────────────────────────────────────
+        # ── Формы ворот и флагов ─────────────────────────────────────────
         for gate in gates:
             gid = gate["id"]
+            if _is_flag(gate):
+                self._draw_flag(gate, in_seq=gid in seq_set)
+                continue
             if gid in two_level_high:
                 continue   # XZ совпадает с нижним — рисуем один раз
             is_sf        = gate.get("is_start_finish", False)
@@ -183,33 +238,28 @@ class TrackMapWidget(pg.PlotWidget):
         # Размер бейджа в метрах (квадрат масштабируется)
         badge_size = 0.4  # 40 сантиметров
         
-        # SF-ворота → «0»
-        if sf_id is not None and sf_id in gate_map:
-            sf_fly = fly_dirs.get(sf_id, (0.0, 1.0))
-            self._draw_badge(gate_map[sf_id], "0", sf_fly,
-                             *_BADGE_LOW, extra=0.0, size=badge_size)
+        # Бейджи: показываем реальный id из JSON для каждого элемента
+        # Порядок: сначала элементы из seq (уже включает sf_id), затем оставшиеся
+        all_ids_ordered = list(dict.fromkeys(list(seq) + [g["id"] for g in gates]))
+        drawn_badges: set[int] = set()
 
-        label_num  = 1
-        visit_cnt: dict[int, int] = {}
-
-        for gid in seq:
-            if gid == sf_id or gid not in gate_map:
+        for gid in all_ids_ordered:
+            if gid not in gate_map or gid in drawn_badges:
                 continue
             gate = gate_map[gid]
-            visit_cnt[gid] = visit_cnt.get(gid, 0) + 1
-            visit = visit_cnt[gid]
+            if _is_flag(gate):
+                continue   # флаги подписываются своим id в _draw_flag
 
-            # Для каждого входа используем одно и то же направление из rotation
+            drawn_badges.add(gid)
             fly_dir = fly_dirs.get(gid, (0.0, 1.0))
-
+            in_seq  = gid in seq_set
             is_high = gid in two_level_high
             fill, border = _BADGE_HIGH if is_high else _BADGE_LOW
+            if not in_seq:
+                fill = _FILL_OFFSEQ
+            extra = 0.5 if (gid in two_level_high and gid in same_dir_pairs) else 0.0
 
-            # Второй бейдж при одинаковом направлении сдвигаем дальше от ворот
-            extra = 0.5 if (is_high and gid in same_dir_pairs) else 0.0
-
-            self._draw_badge(gate, str(label_num), fly_dir, fill, border, extra, badge_size)
-            label_num += 1
+            self._draw_badge(gate, str(gid), fly_dir, fill, border, extra, badge_size)
 
         # ── Границы трассы ───────────────────────────────────────────────
         bounds = track_data.get("bounds")
@@ -234,18 +284,19 @@ class TrackMapWidget(pg.PlotWidget):
                 sp_x = float(sp.get("x", 0))
                 sp_z = float(sp.get("z", sp.get("y", 0)))
 
-            circ = pg.ScatterPlotItem(
-                [sp_x], [sp_z], symbol="o", size=22,
-                brush=pg.mkBrush(None),
+            # Круг в мировых координатах, радиус в 3 раза меньше исходного
+            r       = float(sp.get("radius", 1.0)) / 3.0
+            angles  = [i * 2 * math.pi / 64 for i in range(65)]
+            circ = self.plot(
+                [sp_x + r * math.cos(a) for a in angles],
+                [sp_z + r * math.sin(a) for a in angles],
                 pen=pg.mkPen("#ffffff", width=2),
             )
-            self.addItem(circ)
             self._start_items.append(circ)
 
-            h_lbl = pg.TextItem(anchor=(0.5, 0.5))
-            h_lbl.setHtml(
-                '<span style="color:#ffffff;font-size:10px;font-family:Arial;">H</span>'
-            )
+            # «H» — масштабируется с картой как бейдж, шрифт ×2 от бейджа
+            h_lbl = WorldTextItem("H", "#ffffff",
+                                  size_meters=r * 1.2, font_scale=1.20)
             h_lbl.setPos(sp_x, sp_z)
             self.addItem(h_lbl)
             self._start_items.append(h_lbl)
@@ -304,7 +355,8 @@ class TrackMapWidget(pg.PlotWidget):
         cos_r, sin_r = math.cos(ry), math.sin(ry)
 
         def w(lx: float, lz: float) -> tuple[float, float]:
-            return gx + lx * cos_r - lz * sin_r, gz + lx * sin_r + lz * cos_r
+            # Вращение по часовой стрелке: 0°=горизонт, рост угла → CW
+            return gx + lx * cos_r + lz * sin_r, gz - lx * sin_r + lz * cos_r
 
         pen = pg.mkPen(color, width=2.5)
 
@@ -326,6 +378,51 @@ class TrackMapWidget(pg.PlotWidget):
                 pa = w(ix,  depth * 0.25)
                 pb = w(ix, -depth * 0.25)
                 self._add_line([pa[0], pb[0]], [pa[1], pb[1]], pen)
+
+    def _draw_flag(self, gate: dict, in_seq: bool = True) -> None:
+        """
+        Рисует флаг в виде «+», у которого длинный луч направлен по rotation[1].
+        Формула: long_dir = (cos(ry), sin(ry)) в пространстве (X, Z) карты.
+          rotation=270° → (0, −1) = вниз   rotation=90°  → (0, +1) = вверх
+          rotation=0°   → (+1, 0) = вправо  rotation=180° → (−1, 0) = влево
+        Три коротких луча = _FLAG_ARM, длинный = _FLAG_TOP (×2).
+        Подпись id — под элементом (в сторону, противоположную длинному лучу).
+        Цвет — _CLR_FLAG (совпадает с воротами первого этажа).
+        """
+        gx, _, gz = gate["position"]
+        ry = math.radians(gate["rotation"][1])
+
+        # Единичный вектор длинного луча
+        # 270° → (0,−1)=вниз  90° → (0,+1)=вверх  0° → (−1,0)=влево  180° → (+1,0)=вправо
+        ldx = -math.cos(ry)   # ось X карты
+        ldz =  math.sin(ry)   # ось Z карты
+        # Перпендикуляр (левый/правый лучи)
+        px, pz = -ldz, ldx
+
+        a   = _FLAG_ARM
+        top = _FLAG_TOP
+        pen = pg.mkPen(_CLR_FLAG, width=2.0)
+
+        # Длинный луч
+        self._add_line([gx, gx + ldx * top], [gz, gz + ldz * top], pen)
+        # Короткий луч — в обратную сторону
+        self._add_line([gx, gx - ldx * a],   [gz, gz - ldz * a  ], pen)
+        # Левый и правый лучи
+        self._add_line([gx, gx + px * a],    [gz, gz + pz * a   ], pen)
+        self._add_line([gx, gx - px * a],    [gz, gz - pz * a   ], pen)
+
+        # Бейдж id — стиль как у ворот первого этажа.
+        # Смещён на конец длинного луча (противоположная сторона от короткого).
+        badge_size = 0.4
+        bx = gx + ldx * (top + badge_size / 2 + 0.1)
+        bz = gz + ldz * (top + badge_size / 2 + 0.1)
+        fill, border = _BADGE_LOW
+        if not in_seq:
+            fill = _FILL_OFFSEQ
+        badge = BadgeItem(str(gate["id"]), fill, border, size_meters=badge_size)
+        self.addItem(badge)
+        badge.setPos(bx, bz)
+        self._gate_items.append(badge)
 
     def _add_line(self, xs: list, zs: list, pen) -> None:
         item = self.plot(xs, zs, pen=pen)
@@ -370,8 +467,9 @@ class TrackMapWidget(pg.PlotWidget):
         dirs: dict[int, tuple[float, float]] = {}
         for gid, gate in gate_map.items():
             ry = math.radians(gate["rotation"][1])
-            # Нормаль к плоскости ворот (перпендикуляр к плоскости XY)
-            nx, nz = -math.sin(ry), math.cos(ry)
+            # Направление пролёта при CW-конвенции: (sin(ry), cos(ry))
+            # 0°=через ворота по +Z, 90° CW=через по +X, и т.д.
+            nx, nz = math.sin(ry), math.cos(ry)
             dirs[gid] = (nx, nz)
         return dirs
 

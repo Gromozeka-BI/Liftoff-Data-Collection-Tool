@@ -492,11 +492,6 @@ class MainWindow(QMainWindow):
         if "lap" in ev.get("event_type", ""):
             self._lap_count += 1
             self._rep_bar.set_lap(self._lap_count, self._total_laps)
-            if self._localizer is not None:
-                self._localizer.reset()
-                self._prev_ts_wall = None
-                self._map.clear_localizer_overlay()
-                self._rec_bar.status.update_localizer(None, None)
 
     @pyqtSlot(str)
     def _on_session_started(self, path: str) -> None:

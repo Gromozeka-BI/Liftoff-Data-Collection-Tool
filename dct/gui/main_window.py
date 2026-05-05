@@ -293,6 +293,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_replay_session_selected(self, path: str) -> None:
+        if path == getattr(self, "_last_replay_path", None):
+            return
+        self._last_replay_path = path
         _log.info("Replay session selected: %s", path)
         p = Path(path)
         track_file = p / "track.json"
@@ -304,8 +307,12 @@ class MainWindow(QMainWindow):
         else:
             self._current_track = None
 
-        if self._replay:
-            self._replay.deleteLater()
+        if self._replay is not None:
+            try:
+                self._replay.deleteLater()
+            except RuntimeError:
+                pass   # C++ объект уже удалён предыдущим вызовом
+            self._replay = None
 
         # Restore invert state saved during recording
         invert_path = p / "invert.json"

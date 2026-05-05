@@ -39,7 +39,8 @@ def _make_av_writer(output_path: Path, fps: int, width: int, height: int):
     stream.width   = width
     stream.height  = height
     stream.pix_fmt = "yuv420p"
-    stream.options = {"crf": "23", "preset": "ultrafast", "movflags": "faststart"}
+    stream.options = {"crf": "23", "preset": "ultrafast", "movflags": "faststart",
+                      "threads": "1"}
     return container, stream
 
 
@@ -796,6 +797,7 @@ class PyAvCaptureRecorder:
                 "crf": "23",
                 "preset": "ultrafast",
                 "movflags": "faststart",
+                "threads": "1",
             }
             _put_status({"status": "capturing"})
 

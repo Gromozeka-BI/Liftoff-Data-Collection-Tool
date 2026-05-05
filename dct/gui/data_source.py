@@ -430,6 +430,22 @@ class LiveDataSource(QObject):
 
 # ── Replay ────────────────────────────────────────────────────────────────────
 
+def _safe_read_parquet(path: Path) -> list[dict]:
+    """Читает parquet-файл и возвращает список строк.
+    При повреждённом или отсутствующем файле возвращает [] и логирует предупреждение."""
+    import logging
+    import pyarrow.parquet as _pq
+    if not path.exists():
+        return []
+    try:
+        return _pq.read_table(path).to_pylist()
+    except Exception as exc:
+        logging.getLogger("dct.data_source").warning(
+            "Skipping corrupted parquet file %s: %s", path.name, exc
+        )
+        return []
+
+
 class ReplayDataSource(QObject):
     telemetry_updated = pyqtSignal(dict)
     telemetry_batch   = pyqtSignal(list)
@@ -450,21 +466,16 @@ class ReplayDataSource(QObject):
 
         # ── Telemetry ─────────────────────────────────────────────────────
         telem_path = p / "telemetry.parquet"
-        self._rows: list[dict] = (
-            pq.read_table(telem_path).to_pylist() if telem_path.exists() else []
-        )
+        self._rows: list[dict] = _safe_read_parquet(telem_path)
+
         ev_path = p / "events_edited.parquet"
         if not ev_path.exists():
             ev_path = p / "events.parquet"
-        self._events: list[dict] = (
-            pq.read_table(ev_path).to_pylist() if ev_path.exists() else []
-        )
+        self._events: list[dict] = _safe_read_parquet(ev_path)
 
         # ── RC channels ───────────────────────────────────────────────────
         rc_path = p / "rc_channels.parquet"
-        self._rc_rows: list[dict] = (
-            pq.read_table(rc_path).to_pylist() if rc_path.exists() else []
-        )
+        self._rc_rows: list[dict] = _safe_read_parquet(rc_path)
         self._rc_ts_arr = (
             np.array([r["ts_wall"] for r in self._rc_rows]) if self._rc_rows else np.array([])
         )
@@ -473,7 +484,7 @@ class ReplayDataSource(QObject):
         # ── Timeline (primary clock for scrubbing) ────────────────────────
         tl_path = p / "timeline.parquet"
         if tl_path.exists():
-            tl_rows = pq.read_table(tl_path).to_pylist()
+            tl_rows = _safe_read_parquet(tl_path)
             self._tl_ts = np.array([r["ts_wall"] for r in tl_rows])
         elif self._rows:
             self._tl_ts = np.array([r["ts_wall"] for r in self._rows])

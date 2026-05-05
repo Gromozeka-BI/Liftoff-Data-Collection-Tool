@@ -18,7 +18,12 @@ class VideoReader:
     """Асинхронный ридер: принимает целевой ts_wall, возвращает последний готовый кадр."""
 
     def __init__(self, vid_path: Path, vid_ts: np.ndarray) -> None:
-        self._cap = cv2.VideoCapture(str(vid_path))
+        # CAP_PROP_HW_ACCELERATION=0 → отключаем frame-threading FFmpeg декодера,
+        # чтобы избежать assertion fctx->async_lock в pthread_frame.c
+        self._cap = cv2.VideoCapture(
+            str(vid_path), cv2.CAP_FFMPEG,
+            [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_NONE],
+        )
         self._ts = vid_ts
         self._cur_idx: int = -1
         self._target_idx: int = 0
@@ -49,13 +54,20 @@ class VideoReader:
             return self._latest
 
     def stop(self) -> None:
+        # Только сигнализируем — cap.release() делает сам фоновый поток в finally,
+        # чтобы не было гонки между cap.release() (main) и cap.read() (bg thread).
         self._running = False
         self._wakeup.set()
-        self._cap.release()
 
     # ── внутренний поток ──────────────────────────────────────────────────────
 
     def _run(self) -> None:
+        try:
+            self._run_inner()
+        finally:
+            self._cap.release()
+
+    def _run_inner(self) -> None:
         while self._running:
             self._wakeup.wait(timeout=0.1)
             self._wakeup.clear()

@@ -146,6 +146,7 @@ class WorldTextItem(pg.GraphicsObject):
 class TrackMapWidget(pg.PlotWidget):
     TRAIL_SECS = 3.0
     TRAIL_MAX  = 400
+    LOC_TRAIL_MAX = 120
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -165,6 +166,22 @@ class TrackMapWidget(pg.PlotWidget):
         )
         self.addItem(self._arrow)
         self._arrow.setPos(0, 0)
+
+        # Эталонный круг (пунктир) и оценка локализатора
+        self._ref_path_item = None
+        self._loc_trail_x: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc_trail_z: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc_trail_item = self.plot(
+            [], [], pen=pg.mkPen(theme.LOC_TRAIL, width=1.5),
+        )
+        self._loc_trail_item.setZValue(5)
+        self._loc_arrow = pg.ArrowItem(
+            angle=90, tipAngle=32, headLen=12, tailLen=8,
+            tailWidth=3, brush=pg.mkBrush(theme.LOCALIZER), pen=None,
+        )
+        self._loc_arrow.setZValue(6)
+        self._loc_arrow.setOpacity(0.0)
+        self.addItem(self._loc_arrow)
         self._has_track = False
 
     # ── setup ──────────────────────────────────────────────────────────────
@@ -182,7 +199,46 @@ class TrackMapWidget(pg.PlotWidget):
 
     # ── public API ─────────────────────────────────────────────────────────
 
+    def clear_reference_path(self) -> None:
+        if self._ref_path_item is not None:
+            self.removeItem(self._ref_path_item)
+            self._ref_path_item = None
+
+    def set_reference_path(self, xs, zs) -> None:
+        """Нарисовать эталонную траекторию круга (X, Z в метрах), пунктир."""
+        self.clear_reference_path()
+        xa = list(xs)
+        za = list(zs)
+        if len(xa) < 2:
+            return
+        pen = pg.mkPen(theme.DIM, width=2, style=Qt.PenStyle.DashLine)
+        self._ref_path_item = self.plot(xa, za, pen=pen)
+        self._ref_path_item.setZValue(-2)
+
+    def clear_localizer_overlay(self) -> None:
+        self._loc_trail_x.clear()
+        self._loc_trail_z.clear()
+        self._loc_trail_item.setData([], [])
+        self._loc_arrow.setOpacity(0.0)
+
+    def update_localizer_estimate(self, px: float, pz: float) -> None:
+        """Оценка позиции по стикам: короткий трейл + стрелка по направлению движения."""
+        self._loc_trail_x.append(px)
+        self._loc_trail_z.append(pz)
+        self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
+        self._loc_arrow.setPos(px, pz)
+        self._loc_arrow.setOpacity(1.0)
+        if len(self._loc_trail_x) >= 2:
+            dx = self._loc_trail_x[-1] - self._loc_trail_x[-2]
+            dz = self._loc_trail_z[-1] - self._loc_trail_z[-2]
+            if dx * dx + dz * dz > 1e-8:
+                tang_deg = math.degrees(math.atan2(dz, dx))
+                self._loc_arrow.setStyle(angle=90 - tang_deg)
+
     def setup_track(self, track_data: dict[str, Any]) -> None:
+        self.clear_reference_path()
+        self.clear_localizer_overlay()
+
         for item in self._gate_items:
             self.removeItem(item)
         self._gate_items.clear()

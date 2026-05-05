@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QGridLayout, QLabel, QWidget
 from dct.gui import theme
 
 _TOOLTIPS = {
+    "loc":      "Stick-based localizer: lap progress on reference circle and σ [m]",
     "rec":      "Session recording status",
     "duration": "Elapsed recording time (seconds)",
     "packets":  "Total UDP packets received from LiftOff simulator",
@@ -70,9 +71,13 @@ class StatusPanel(QWidget):
         grid.addWidget(QLabel("Pos"),  4, 2)
         self._lbl_pos  = _lbl("—",    "pos");     grid.addWidget(self._lbl_pos,  4, 3)
 
+        grid.addWidget(QLabel("Loc"), 5, 0)
+        self._lbl_loc = _lbl("—", "loc", f"color: {theme.DIM}; font-size: 11px;")
+        grid.addWidget(self._lbl_loc, 5, 1, 1, 3)
+
         # Подписи-заголовки: dim + тот же тултип, что и у соответствующего значения
         _static_key = {"Pkts": "packets", "Hz": "hz", "Laps": "laps", "Drop": "dropped",
-                       "Spd": "speed", "Alt": "alt", "Bat": "bat", "Pos": "pos"}
+                       "Spd": "speed", "Alt": "alt", "Bat": "bat", "Pos": "pos", "Loc": "loc"}
         for i in range(grid.count()):
             w = grid.itemAt(i).widget()
             if isinstance(w, QLabel) and w.text() in _static_key:
@@ -87,6 +92,7 @@ class StatusPanel(QWidget):
         self._lbl_bat.setMinimumWidth(52)
         self._lbl_pos.setMinimumWidth(140)
         self._lbl_dur.setMinimumWidth(60)
+        self._lbl_loc.setMinimumWidth(200)
 
     # ── public API ─────────────────────────────────────────────────────────
 
@@ -120,4 +126,12 @@ class StatusPanel(QWidget):
         self._lbl_bat.setText(f"{frame['bat_v']:.1f} V")
         self._lbl_pos.setText(
             f"X{frame['pos_x']:.1f} Y{frame['pos_y']:.1f} Z{frame['pos_z']:.1f}"
+        )
+
+    def update_localizer(self, progress: float | None, sigma_m: float | None) -> None:
+        if progress is None or sigma_m is None:
+            self._lbl_loc.setText("—")
+            return
+        self._lbl_loc.setText(
+            f"{progress * 100:.0f}%  σ±{sigma_m:.1f} m",
         )

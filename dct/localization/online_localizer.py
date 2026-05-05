@@ -1,0 +1,378 @@
+"""
+OnlineLocalizer — онлайн-локализация дрона по стикам пульта.
+
+Алгоритм: Particle Filter в 1D-параметризации трассы.
+Зависимости: только numpy.
+
+Быстрый старт
+-------------
+    from dct.localization.online_localizer import OnlineLocalizer
+
+    loc = OnlineLocalizer.from_file("reference.npz")
+
+    # в цикле на каждый фрейм телеметрии:
+    result = loc.update(
+        sticks=[throttle, yaw, pitch, roll],
+        dt=0.01,
+    )
+    print(result.position_xyz)   # [x, y, z] в метрах
+    print(result.progress)       # 0.0 .. 1.0 (доля пройденного круга)
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Структура результата
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LocalizerResult:
+    """Результат одного шага локализации."""
+
+    position_xyz: np.ndarray
+    """Оценка позиции дрона [x, y, z] в метрах (система координат трассы)."""
+
+    s: float
+    """Пройденное расстояние по дуге трассы в метрах (0 .. track_length)."""
+
+    progress: float
+    """Доля пройденного круга: 0.0 = старт, 1.0 = финиш."""
+
+    uncertainty_m: float
+    """Оценка неопределённости позиции в метрах (стандартное отклонение частиц)."""
+
+    track_length: float
+    """Полная длина эталонного круга в метрах."""
+
+
+# ---------------------------------------------------------------------------
+# Эталон трассы
+# ---------------------------------------------------------------------------
+
+class Reference:
+    """Эталонный круг: нормализованные стики + позиции вдоль дуги."""
+
+    def __init__(
+        self,
+        s: np.ndarray,
+        pos: np.ndarray,
+        sticks_norm: np.ndarray,
+        mean: np.ndarray,
+        std: np.ndarray,
+        smooth_w: int = 5,
+    ):
+        self.s = s                       # (N,) — дуговой параметр, м
+        self.pos = pos                   # (N, 3) — xyz в метрах
+        self.sticks_norm = sticks_norm   # (N, 4) — нормализованные стики
+        self.mean = mean                 # (4,) — среднее стиков эталона
+        self.std = std                   # (4,) — std стиков эталона
+        self.smooth_w = smooth_w
+        self.L = float(s[-1])            # длина круга в метрах
+
+    # ------------------------------------------------------------------
+    def pos_at_s(self, s_query: float | np.ndarray) -> np.ndarray:
+        """Интерполировать xyz по дуговому параметру s."""
+        s_query = np.asarray(s_query, dtype=float)
+        s_clip = np.clip(s_query, 0.0, self.L)
+        x = np.interp(s_clip, self.s, self.pos[:, 0])
+        y = np.interp(s_clip, self.s, self.pos[:, 1])
+        z = np.interp(s_clip, self.s, self.pos[:, 2])
+        if s_query.ndim == 0:
+            return np.array([x, y, z])
+        return np.stack([x, y, z], axis=-1)
+
+    # ------------------------------------------------------------------
+    def normalize_sticks(self, sticks: np.ndarray) -> np.ndarray:
+        """Нормализовать входной вектор стиков так же, как эталон."""
+        sm = _smooth_box(np.atleast_2d(sticks), self.smooth_w)
+        return (sm - self.mean) / self.std
+
+    # ------------------------------------------------------------------
+    def save(self, path: str | Path) -> None:
+        """Сохранить эталон в .npz-файл."""
+        np.savez_compressed(
+            path,
+            s=self.s,
+            pos=self.pos,
+            sticks_norm=self.sticks_norm,
+            mean=self.mean,
+            std=self.std,
+            smooth_w=np.array(self.smooth_w),
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Reference":
+        """Загрузить эталон из .npz-файла."""
+        d = np.load(path)
+        return cls(
+            s=d["s"],
+            pos=d["pos"],
+            sticks_norm=d["sticks_norm"],
+            mean=d["mean"],
+            std=d["std"],
+            smooth_w=int(d["smooth_w"]),
+        )
+
+    @classmethod
+    def build(
+        cls,
+        t: np.ndarray,
+        sticks: np.ndarray,
+        pos: np.ndarray,
+        smooth_w: int = 5,
+    ) -> "Reference":
+        """Построить эталон из массивов временного ряда одного круга.
+
+        Parameters
+        ----------
+        t       : (N,) временные метки, сек
+        sticks  : (N, 4) стики [throttle, yaw, pitch, roll] в диапазоне -1..1
+        pos     : (N, 3) позиции [x, y, z] в метрах
+        smooth_w: ширина окна сглаживания (нечётное число)
+        """
+        sticks_sm = _smooth_box(sticks, smooth_w)
+        mean = sticks_sm.mean(axis=0)
+        std = sticks_sm.std(axis=0) + 1e-6
+        sticks_norm = (sticks_sm - mean) / std
+
+        deltas = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+        s = np.concatenate([[0.0], np.cumsum(deltas)])
+
+        return cls(s=s, pos=pos, sticks_norm=sticks_norm,
+                   mean=mean, std=std, smooth_w=smooth_w)
+
+
+# ---------------------------------------------------------------------------
+# Particle Filter
+# ---------------------------------------------------------------------------
+
+class ParticleFilter:
+    """1D Particle Filter по дуговому параметру трассы.
+
+    Состояние каждой частицы: (s, v) — позиция на трассе (м) и скорость (м/с).
+    """
+
+    def __init__(
+        self,
+        ref: Reference,
+        n_particles: int = 1000,
+        v_init_mps: float = 10.0,
+        v_init_std: float = 3.0,
+        v_min: float = 0.5,
+        v_max: float = 30.0,
+        obs_sigma: float = 2.0,
+        process_noise_s: float = 1.5,
+        process_noise_v: float = 3.0,
+        ess_threshold: float = 0.5,
+        roughening_s: float = 0.2,
+        random_inject_frac: float = 0.02,
+        seed: int = 42,
+    ):
+        self.ref = ref
+        self.N = n_particles
+        self.v_init = v_init_mps
+        self.v_init_std = v_init_std
+        self.v_min = v_min
+        self.v_max = v_max
+        self.obs_sigma2_eff = obs_sigma ** 2 * ref.sticks_norm.shape[1]
+        self.q_s = process_noise_s
+        self.q_v = process_noise_v
+        self.ess_thr = ess_threshold
+        self.roughening_s = roughening_s
+        self.random_inject_frac = random_inject_frac
+        self.rng = np.random.default_rng(seed)
+
+        self._s: np.ndarray | None = None
+        self._v: np.ndarray | None = None
+        self._w: np.ndarray | None = None
+
+    def reset(self) -> None:
+        """Сбросить фильтр в начальное состояние (старт/финиш трассы)."""
+        half = self.N // 2
+        s0 = np.abs(self.rng.normal(0, 3.0, half))
+        s1 = self.ref.L - np.abs(self.rng.normal(0, 3.0, self.N - half))
+        self._s = np.mod(np.concatenate([s0, s1]), self.ref.L)
+        self._v = np.clip(
+            self.rng.normal(self.v_init, self.v_init_std, self.N),
+            self.v_min, self.v_max,
+        )
+        self._w = np.ones(self.N) / self.N
+
+    def update(self, stick_norm: np.ndarray, dt: float | None) -> tuple[float, float]:
+        """Один шаг фильтра.
+
+        Parameters
+        ----------
+        stick_norm : (4,) нормализованный вектор стиков
+        dt         : время с предыдущего шага, сек (None для первого шага)
+
+        Returns
+        -------
+        s_est     : оценка позиции на трассе, м
+        sigma     : неопределённость, м
+        """
+        if self._s is None:
+            self.reset()
+
+        # --- предсказание ---
+        if dt is not None and dt > 0:
+            self._v += self.rng.normal(0, self.q_v * np.sqrt(dt), self.N)
+            self._v = np.clip(self._v, self.v_min, self.v_max)
+            self._s += self._v * dt + self.rng.normal(0, self.q_s * np.sqrt(dt), self.N)
+            self._s = np.mod(self._s, self.ref.L)
+
+        # --- обновление весов по наблюдению ---
+        idx = np.searchsorted(self.ref.s, self._s).clip(0, len(self.ref.s) - 1)
+        feats = self.ref.sticks_norm[idx]
+        d2 = np.sum((feats - stick_norm[None, :]) ** 2, axis=1)
+        log_w = np.log(self._w + 1e-30) - 0.5 * d2 / self.obs_sigma2_eff
+        log_w -= log_w.max()
+        self._w = np.exp(log_w)
+        self._w /= self._w.sum() + 1e-12
+
+        # --- ресемплинг при вырождении ---
+        ess = 1.0 / (np.sum(self._w ** 2) + 1e-12)
+        if ess < self.ess_thr * self.N:
+            positions = (self.rng.uniform(0, 1) + np.arange(self.N)) / self.N
+            cumw = np.cumsum(self._w)
+            cumw[-1] = 1.0
+            idx_r = np.clip(np.searchsorted(cumw, positions), 0, self.N - 1)
+            self._s = self._s[idx_r] + self.rng.normal(0, self.roughening_s, self.N)
+            self._s = np.mod(self._s, self.ref.L)
+            self._v = self._v[idx_r]
+            if self.random_inject_frac > 0:
+                n_inj = max(1, int(self.N * self.random_inject_frac))
+                inj = self.rng.choice(self.N, n_inj, replace=False)
+                self._s[inj] = self.rng.uniform(0, self.ref.L, n_inj)
+            self._w = np.ones(self.N) / self.N
+
+        # --- оценка позиции (circular mean) ---
+        theta = 2 * np.pi * self._s / self.ref.L
+        cx = float(np.sum(self._w * np.cos(theta)))
+        cy = float(np.sum(self._w * np.sin(theta)))
+        ang = np.arctan2(cy, cx)
+        if ang < 0:
+            ang += 2 * np.pi
+        s_est = float(ang * self.ref.L / (2 * np.pi))
+
+        R = np.sqrt(cx ** 2 + cy ** 2)
+        sigma = float(np.sqrt(max(1e-6, 1.0 - R)) * self.ref.L / (2 * np.pi))
+        return s_est, sigma
+
+
+# ---------------------------------------------------------------------------
+# Публичный класс-обёртка
+# ---------------------------------------------------------------------------
+
+class OnlineLocalizer:
+    """Онлайн-локализатор дрона на трассе по стикам пульта.
+
+    Пример использования
+    --------------------
+        loc = OnlineLocalizer.from_file("reference.npz")
+        loc.reset()
+
+        prev_ts = None
+        for ts, throttle, yaw, pitch, roll in telemetry_stream:
+            dt = (ts - prev_ts) if prev_ts is not None else None
+            result = loc.update([throttle, yaw, pitch, roll], dt=dt)
+            prev_ts = ts
+
+            print(f"Позиция: {result.position_xyz}  Прогресс: {result.progress:.1%}")
+    """
+
+    def __init__(self, ref: Reference, **pf_kwargs):
+        """
+        Parameters
+        ----------
+        ref       : эталонный круг (Reference)
+        pf_kwargs : параметры Particle Filter (см. ParticleFilter.__init__)
+        """
+        self.ref = ref
+        self._pf = ParticleFilter(ref, **pf_kwargs)
+        self._prev_sticks_buffer: list[np.ndarray] = []
+        self._initialized = False
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def from_file(cls, path: str | Path, **pf_kwargs) -> "OnlineLocalizer":
+        """Создать локализатор из сохранённого .npz-файла эталона."""
+        ref = Reference.load(path)
+        return cls(ref, **pf_kwargs)
+
+    # ------------------------------------------------------------------
+    def reset(self) -> None:
+        """Сбросить состояние фильтра (например, при старте нового круга)."""
+        self._pf.reset()
+        self._prev_sticks_buffer = []
+        self._initialized = True
+
+    # ------------------------------------------------------------------
+    def update(
+        self,
+        sticks: list[float] | np.ndarray,
+        dt: float | None,
+    ) -> LocalizerResult:
+        """Обновить оценку позиции по новому вектору стиков.
+
+        Parameters
+        ----------
+        sticks : [throttle, yaw, pitch, roll] в диапазоне -1..1
+        dt     : время с предыдущего вызова update(), сек.
+                 Передать None для первого вызова.
+
+        Returns
+        -------
+        LocalizerResult с полями position_xyz, s, progress, uncertainty_m, track_length
+        """
+        if not self._initialized:
+            self.reset()
+
+        sticks = np.asarray(sticks, dtype=float)
+
+        # накапливаем буфер для сглаживания (smooth_w последних фреймов)
+        self._prev_sticks_buffer.append(sticks)
+        w = self.ref.smooth_w
+        if len(self._prev_sticks_buffer) > w:
+            self._prev_sticks_buffer.pop(0)
+
+        # сглаживаем и нормализуем
+        buf = np.array(self._prev_sticks_buffer)
+        smoothed = buf.mean(axis=0)
+        stick_norm = (smoothed - self.ref.mean) / self.ref.std
+
+        s_est, sigma = self._pf.update(stick_norm, dt)
+        xyz = self.ref.pos_at_s(s_est)
+
+        return LocalizerResult(
+            position_xyz=xyz,
+            s=s_est,
+            progress=s_est / self.ref.L,
+            uncertainty_m=sigma,
+            track_length=self.ref.L,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
+
+def _smooth_box(x: np.ndarray, w: int) -> np.ndarray:
+    if w <= 1:
+        return x
+    pad = w // 2
+    padded = np.concatenate([
+        np.repeat(x[:1], pad, axis=0),
+        x,
+        np.repeat(x[-1:], pad, axis=0),
+    ], axis=0)
+    kernel = np.ones(w) / w
+    out = np.empty_like(x)
+    for j in range(x.shape[1]):
+        out[:, j] = np.convolve(padded[:, j], kernel, mode="valid")[:len(x)]
+    return out

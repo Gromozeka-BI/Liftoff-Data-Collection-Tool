@@ -10,7 +10,7 @@ import threading
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -68,6 +68,7 @@ class RecordBar(QWidget):
         self._loading           = False   # True while programmatically restoring settings
         self._saved_com_port    = ""
         self._saved_video_index = None
+        self._localizer_ref_path = ""
         root = QHBoxLayout(self)
         root.setSpacing(8)
         root.setContentsMargins(6, 4, 6, 4)
@@ -156,6 +157,32 @@ class RecordBar(QWidget):
         vid_vlay.addLayout(save_row)
         root.addWidget(vid_box)
 
+        # ── Stick localizer (reference.npz) ─────────────────────────────
+        loc_box = QGroupBox("Localizer")
+        loc_lay = QVBoxLayout(loc_box)
+        loc_lay.setSpacing(3)
+        loc_row = QHBoxLayout()
+        loc_row.setSpacing(4)
+        self._chk_localizer = QCheckBox("Enable")
+        self._chk_localizer.setToolTip(
+            "Онлайн-оценка позиции по стикам Liftoff; нужен .npz эталонного круга",
+        )
+        self._btn_ref_npz = QPushButton("…")
+        self._btn_ref_npz.setFixedWidth(28)
+        self._btn_ref_npz.setToolTip("Выбрать reference.npz")
+        self._btn_ref_npz.clicked.connect(self._browse_localizer_ref)
+        self._lbl_ref_npz = QLabel("(no file)")
+        self._lbl_ref_npz.setStyleSheet(f"color: {theme.DIM}; font-size: 9px;")
+        self._lbl_ref_npz.setToolTip("")
+        self._lbl_ref_npz.setMinimumWidth(120)
+        self._lbl_ref_npz.setMaximumWidth(220)
+        self._lbl_ref_npz.setWordWrap(False)
+        loc_row.addWidget(self._chk_localizer)
+        loc_row.addWidget(self._btn_ref_npz)
+        loc_row.addWidget(self._lbl_ref_npz, stretch=1)
+        loc_lay.addLayout(loc_row)
+        root.addWidget(loc_box)
+
         # ── Status ────────────────────────────────────────────────────────
         self.status = StatusPanel()
         root.addWidget(self.status)
@@ -213,6 +240,7 @@ class RecordBar(QWidget):
             combo.currentIndexChanged.connect(self._save_settings)
         self._combo_ds_mode.currentIndexChanged.connect(self._save_settings)
         self._combo_com.currentIndexChanged.connect(self._save_settings)
+        self._chk_localizer.stateChanged.connect(self._save_localizer_settings)
 
         # Only scan COM ports automatically (lightweight). Video device scan is
         # triggered by the user via ↻ to avoid DirectShow interference with the
@@ -243,6 +271,38 @@ class RecordBar(QWidget):
             self._lbl_sessions_dir.setText(folder)
             ui_settings.update("sessions_dir", folder)
 
+    def _apply_localizer_label(self) -> None:
+        p = self._localizer_ref_path
+        self._lbl_ref_npz.setToolTip(p or "")
+        if not p:
+            self._lbl_ref_npz.setText("(no file)")
+            return
+        name = Path(p).name
+        if len(name) <= 26:
+            self._lbl_ref_npz.setText(name)
+        else:
+            self._lbl_ref_npz.setText(f"{name[:11]}…{name[-12:]}")
+
+    def _browse_localizer_ref(self) -> None:
+        start_dir = str(Path(self._localizer_ref_path).parent) if self._localizer_ref_path else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Эталонный круг (reference.npz)",
+            start_dir or ".",
+            "NumPy archives (*.npz);;All files (*.*)",
+        )
+        if path:
+            self._localizer_ref_path = path
+            self._apply_localizer_label()
+            self._save_localizer_settings()
+
+    def _save_localizer_settings(self) -> None:
+        if self._loading:
+            return
+        d = ui_settings.load()
+        d["localizer_reference_npz"] = self._localizer_ref_path
+        d["localizer_enabled"] = self._chk_localizer.isChecked()
+        ui_settings.save(d)
+
     def get_sessions_dir(self) -> str:
         return ui_settings.load().get("sessions_dir", "sessions")
 
@@ -271,6 +331,12 @@ class RecordBar(QWidget):
                     if self._combo_ds_mode.itemData(i) == mode:
                         self._combo_ds_mode.setCurrentIndex(i)
                         break
+
+            self._localizer_ref_path = str(s.get("localizer_reference_npz", "") or "")
+            self._chk_localizer.blockSignals(True)
+            self._chk_localizer.setChecked(bool(s.get("localizer_enabled", False)))
+            self._chk_localizer.blockSignals(False)
+            self._apply_localizer_label()
         finally:
             self._loading = False
 
@@ -302,7 +368,8 @@ class RecordBar(QWidget):
         for w in (self._combo_pilot, self._combo_drone, self._combo_rate,
                   self._combo_camera, self._combo_track,
                   self._combo_ds_mode, self._combo_com, self._btn_refresh_com,
-                  self._combo_source, self._btn_refresh_src):
+                  self._combo_source, self._btn_refresh_src,
+                  self._chk_localizer, self._btn_ref_npz):
             w.setEnabled(not active)
 
     def set_rc_status(self, online: bool) -> None:
@@ -422,6 +489,26 @@ class RecordBar(QWidget):
         if mode in (_SRC_RC, _SRC_BOTH) and not self._combo_com.currentText():
             missing.append("RC COM port")
 
+        if self._chk_localizer.isChecked():
+            if not self._localizer_ref_path:
+                QMessageBox.warning(
+                    self, "Localizer",
+                    "Включён локализатор, но не выбран файл reference.npz.",
+                )
+                return
+            if not Path(self._localizer_ref_path).is_file():
+                QMessageBox.warning(
+                    self, "Localizer",
+                    f"Файл эталона не найден:\n{self._localizer_ref_path}",
+                )
+                return
+            if mode == _SRC_RC:
+                QMessageBox.warning(
+                    self, "Localizer",
+                    "Режим «RC only» не содержит стиков Liftoff — локализатор "
+                    "будет отключён для этой сессии.",
+                )
+
         if missing:
             QMessageBox.warning(
                 self, "Session config incomplete",
@@ -437,6 +524,12 @@ class RecordBar(QWidget):
                     track_path = p
                     break
 
+        loc_enabled = (
+            self._chk_localizer.isChecked()
+            and bool(self._localizer_ref_path)
+            and Path(self._localizer_ref_path).is_file()
+            and mode in (_SRC_LIFTOFF, _SRC_BOTH)
+        )
         cfg = {
             "pilot":        pilot_data.get("nickname", pilot_data.get("id", "?")),
             "drone":        drone_data.get("id", drone_data["name"]),
@@ -449,6 +542,8 @@ class RecordBar(QWidget):
             "data_source":  mode,
             "rc_port":      self._combo_com.currentText() or None,
             "sessions_dir": self.get_sessions_dir(),
+            "localizer_enabled":      loc_enabled,
+            "localizer_reference_path": self._localizer_ref_path if loc_enabled else None,
         }
         self.start_requested.emit(cfg)
 

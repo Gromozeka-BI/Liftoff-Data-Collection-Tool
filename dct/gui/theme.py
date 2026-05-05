@@ -12,6 +12,8 @@ ERR    = "#F44747"
 
 DRONE   = "#4EC9B0"
 TRAIL   = "#2D7DD2"
+LOCALIZER = "#D7BA7D"   # оценка позиции по стикам (отличить от GT)
+LOC_TRAIL = "#8B7355"
 GATE    = "#CE9178"
 GATE_SF = "#4EC9B0"
 

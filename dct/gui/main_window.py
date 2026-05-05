@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
@@ -20,6 +21,7 @@ from dct.gui.widgets.stick_graphs import StickGraphsWidget
 from dct.gui.widgets.video_preview import VideoPreviewWidget
 from dct.gui.widgets.record_bar import RecordBar
 from dct.gui.widgets.replay_bar import ReplayBar
+from dct.localization import OnlineLocalizer
 from dct.video_preview_source import VideoPreviewSource
 from dct.log import get_logger
 
@@ -46,6 +48,8 @@ class MainWindow(QMainWindow):
         self._total_laps   = 0
         self._current_track: dict | None = None
         self._latest_frame:  dict | None = None
+        self._localizer: OnlineLocalizer | None = None
+        self._prev_ts_wall: float | None = None
 
         self._build_ui()
         self._connect_record_bar()
@@ -94,7 +98,7 @@ class MainWindow(QMainWindow):
         self._rep_bar = ReplayBar()
         self._stack.addWidget(self._rec_bar)
         self._stack.addWidget(self._rep_bar)
-        self._stack.setFixedHeight(145)
+        self._stack.setFixedHeight(165)
         vbox.addWidget(self._stack)
 
     def _build_mode_bar(self) -> QWidget:
@@ -146,6 +150,8 @@ class MainWindow(QMainWindow):
         self._graphs.clear()
         self._video.clear_frame()
         self._lap_count = 0
+        if mode == _MODE_REPLAY:
+            self._deactivate_localizer_full()
 
         if mode == _MODE_RECORD:
             self._start_preview(self._rec_bar.current_video_source())
@@ -190,6 +196,44 @@ class MainWindow(QMainWindow):
         if self._mode == _MODE_RECORD and self._preview is not None:
             self._start_preview(source_cfg)
 
+    def _teardown_localizer(self) -> None:
+        self._localizer = None
+        self._prev_ts_wall = None
+        self._map.clear_localizer_overlay()
+        self._rec_bar.status.update_localizer(None, None)
+        self._rep_bar.status.update_localizer(None, None)
+
+    def _deactivate_localizer_full(self) -> None:
+        self._teardown_localizer()
+        self._map.clear_reference_path()
+
+    def _init_localizer_from_cfg(self, cfg: dict) -> None:
+        self._teardown_localizer()
+        if not cfg.get("localizer_enabled"):
+            self._map.clear_reference_path()
+            return
+        path = cfg.get("localizer_reference_path")
+        if not path:
+            self._map.clear_reference_path()
+            return
+        p = Path(str(path))
+        if not p.is_file():
+            QMessageBox.warning(self, "Localizer", f"Файл не найден:\n{p}")
+            self._map.clear_reference_path()
+            return
+        try:
+            data = np.load(p, allow_pickle=False)
+            pos = data["pos"]
+            self._map.set_reference_path(pos[:, 0], pos[:, 2])
+            self._localizer = OnlineLocalizer.from_file(p)
+            self._localizer.reset()
+            self._prev_ts_wall = None
+        except Exception as exc:
+            _log.error("Localizer init failed: %s", exc)
+            QMessageBox.warning(self, "Localizer", f"Не удалось загрузить эталон:\n{exc}")
+            self._map.clear_reference_path()
+            self._localizer = None
+
     @pyqtSlot(dict)
     def _on_start_session(self, cfg: dict) -> None:
         # Guard: hotkeys are application-wide, ignore if not in Record mode
@@ -208,6 +252,8 @@ class MainWindow(QMainWindow):
                 self._current_track = None
         else:
             self._current_track = None
+
+        self._init_localizer_from_cfg(cfg)
 
         import time as _time
         self._graphs.set_time_zero(_time.time())
@@ -231,6 +277,7 @@ class MainWindow(QMainWindow):
             _log.error("Failed to start session: %s", e)
             QMessageBox.critical(self, "Start error", str(e))
             self._live = None
+            self._deactivate_localizer_full()
             self._start_preview(self._rec_bar.current_video_source())
             return
 
@@ -411,6 +458,32 @@ class MainWindow(QMainWindow):
     def _on_telemetry(self, frame: dict) -> None:
         self._latest_frame = frame
         self._map.update_drone(frame)
+        if self._mode == _MODE_RECORD and self._localizer is not None:
+            ts = float(frame["ts_wall"])
+            prev = self._prev_ts_wall
+            dt = (ts - prev) if prev is not None else None
+            if dt is not None and (dt < 0 or dt > 2.0):
+                dt = None
+            self._prev_ts_wall = ts
+            try:
+                res = self._localizer.update(
+                    [
+                        frame["in_throttle"],
+                        frame["in_yaw"],
+                        frame["in_pitch"],
+                        frame["in_roll"],
+                    ],
+                    dt,
+                )
+                self._map.update_localizer_estimate(
+                    float(res.position_xyz[0]),
+                    float(res.position_xyz[2]),
+                )
+                self._rec_bar.status.update_localizer(
+                    res.progress, res.uncertainty_m,
+                )
+            except Exception as exc:
+                _log.warning("Localizer update failed: %s", exc)
         status = self._rec_bar.status if self._mode == _MODE_RECORD else self._rep_bar.status
         status.update_telemetry(frame)
 
@@ -419,6 +492,11 @@ class MainWindow(QMainWindow):
         if "lap" in ev.get("event_type", ""):
             self._lap_count += 1
             self._rep_bar.set_lap(self._lap_count, self._total_laps)
+            if self._localizer is not None:
+                self._localizer.reset()
+                self._prev_ts_wall = None
+                self._map.clear_localizer_overlay()
+                self._rec_bar.status.update_localizer(None, None)
 
     @pyqtSlot(str)
     def _on_session_started(self, path: str) -> None:
@@ -464,6 +542,7 @@ class MainWindow(QMainWindow):
                     f"Stats: {val.stats}\n\nAll checks passed.",
                 )
         self._live = None
+        self._deactivate_localizer_full()
         # Resume live preview after recording ends
         self._start_preview(self._rec_bar.current_video_source())
 

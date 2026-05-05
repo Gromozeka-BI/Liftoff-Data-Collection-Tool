@@ -17,10 +17,12 @@
   "drone": "MadTrainer",
   "rate": "Gromozeka_rate",
   "camera": "45 deg / 130 FOV",
-  "track": "Первая трасса",
+  "track": "MAD FGDR 2026 Abu-Dhabi TeamRace",
   "ds_mode": "both",
   "com_port": "COM3",
   "video_source_index": 1,
-  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_3",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_1.1"
+  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_4",
+  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_1.1",
+  "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
+  "localizer_enabled": true
 }

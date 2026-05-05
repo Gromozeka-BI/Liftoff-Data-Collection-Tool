@@ -79,8 +79,11 @@ def _validate_liftoff(session_dir: Path, result: ValidationResult) -> None:
     gaps   = np.diff(ts_arr)
     max_gap_ms = float(np.max(gaps) * 1000) if len(gaps) > 0 else 0.0
     result.stats["max_gap_ms"] = round(max_gap_ms, 1)
-    if max_gap_ms > 100.0:
-        result.fail(f"max packet gap {max_gap_ms:.1f} ms > 100 ms")
+    # Liftoff/Unity GC causes 200–400 ms pauses — warn only; fail above 500 ms
+    if max_gap_ms > 500.0:
+        result.fail(f"max packet gap {max_gap_ms:.1f} ms > 500 ms (severe dropout)")
+    elif max_gap_ms > 200.0:
+        result.warn(f"max packet gap {max_gap_ms:.1f} ms > 200 ms (Unity GC pause, data ok)")
 
     laps = gates_passed = 0
     if events_path.exists():

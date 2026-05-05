@@ -431,13 +431,31 @@ class MainWindow(QMainWindow):
         self._rec_bar.set_recording(False)
         val = result.get("validation")
         if val:
-            status_str = "PASSED" if val.passed else "FAILED"
-            issues     = "\n".join(val.issues) if val.issues else "All checks passed."
-            QMessageBox.information(
-                self, f"Session validation {status_str}",
-                f"Session: {result.get('session_dir', '')}\n\n"
-                f"Stats: {val.stats}\n\n{issues}",
-            )
+            errors = [i for i in val.issues if not i.startswith("WARN:")]
+            warns  = [i for i in val.issues if i.startswith("WARN:")]
+            if not val.passed:
+                status_str = "FAILED"
+                body = "\n".join(errors)
+                if warns:
+                    body += "\n\n" + "\n".join(warns)
+                QMessageBox.warning(
+                    self, f"Session validation {status_str}",
+                    f"Session: {result.get('session_dir', '')}\n\n"
+                    f"Stats: {val.stats}\n\n{body}",
+                )
+            elif warns:
+                body = "\n".join(warns)
+                QMessageBox.warning(
+                    self, "Session validation PASSED (with warnings)",
+                    f"Session: {result.get('session_dir', '')}\n\n"
+                    f"Stats: {val.stats}\n\n{body}",
+                )
+            else:
+                QMessageBox.information(
+                    self, "Session validation PASSED",
+                    f"Session: {result.get('session_dir', '')}\n\n"
+                    f"Stats: {val.stats}\n\nAll checks passed.",
+                )
         self._live = None
         # Resume live preview after recording ends
         self._start_preview(self._rec_bar.current_video_source())

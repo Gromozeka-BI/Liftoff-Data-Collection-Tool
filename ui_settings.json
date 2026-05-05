@@ -13,14 +13,14 @@
       "ch1": false
     }
   },
-  "pilot": "PlatOnAir",
-  "drone": "TestDrone",
-  "rate": "PlatOnAir_330_rate",
-  "camera": "HDZero Nano V2",
-  "track": "FGDR Track_1 LZ",
-  "ds_mode": "rc",
+  "pilot": "Gromozeka",
+  "drone": "MadTrainer",
+  "rate": "Gromozeka_rate",
+  "camera": "45 deg / 130 FOV",
+  "track": "Первая трасса",
+  "ds_mode": "both",
   "com_port": "COM3",
   "video_source_index": 1,
-  "sessions_dir": "C:/Users/Gromozeka/source/repos/Gromozeka-BI/Liftoff-Data-Collection-Tool/session",
-  "replay_dir": "C:/Users/Gromozeka/source/repos/Gromozeka-BI/Liftoff-Data-Collection-Tool/session"
+  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_1",
+  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_1"
 }

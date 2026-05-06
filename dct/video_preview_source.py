@@ -2,6 +2,12 @@
 
 Used to show live preview in Record mode before (and after) a recording session.
 Runs at ~20 fps to minimise CPU load (UI doesn't need 60 fps for preview).
+
+Capture backend selection mirrors the recorder's:
+``settings.screen_capture_backend`` ∈ {``"auto"``, ``"dxgi"``, ``"mss"``}.
+``auto`` prefers DXGI (``dxcam``) on Windows so the live mouse cursor doesn't
+jitter while the preview is running; falls back to mss when ``dxcam`` is
+not installed or DXGI duplication is unavailable.
 """
 from __future__ import annotations
 
@@ -13,12 +19,37 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from dct.config import settings
 from dct.log import get_logger
-from dct.screen_recorder import list_all_video_device_names, is_virtual_device
+from dct.screen_recorder import (
+    get_shared_dxgi_camera,
+    is_virtual_device,
+    list_all_video_device_names,
+)
 
 _log = get_logger("video_preview_source")
 
 _PREVIEW_FPS = 20
+
+
+def _resolve_screen_backend() -> str:
+    """Return the actual backend to use: ``"dxgi"`` or ``"mss"``."""
+    requested = (settings.screen_capture_backend or "auto").lower()
+    if requested in ("mss", "gdi"):
+        return "mss"
+    if sys.platform != "win32":
+        return "mss"
+    try:
+        import dxcam  # type: ignore[import-not-found]  # noqa: F401
+    except ImportError:
+        if requested in ("dxgi", "dxcam"):
+            _log.warning(
+                "screen_capture_backend='%s' but dxcam is not installed — "
+                "preview falls back to mss",
+                requested,
+            )
+        return "mss"
+    return "dxgi"
 
 
 class VideoPreviewSource:
@@ -61,6 +92,19 @@ class VideoPreviewSource:
             self._loop_screen()
 
     def _loop_screen(self) -> None:
+        backend = _resolve_screen_backend()
+        if backend == "dxgi":
+            try:
+                self._loop_screen_dxgi()
+                return
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(
+                    "DXGI preview failed (%s) — falling back to mss",
+                    exc,
+                )
+        self._loop_screen_mss()
+
+    def _loop_screen_mss(self) -> None:
         import mss
         interval = 1.0 / _PREVIEW_FPS
         try:
@@ -78,7 +122,40 @@ class VideoPreviewSource:
                         time.sleep(rem)
         except Exception as exc:
             if self._running:
-                _log.error("Screen preview error: %s", exc)
+                _log.error("Screen preview error (mss): %s", exc)
+
+    def _loop_screen_dxgi(self) -> None:
+        """DXGI Desktop Duplication preview — does not perturb the hardware
+        mouse cursor overlay, so the live cursor doesn't jitter while the
+        preview is running."""
+        interval = 1.0 / _PREVIEW_FPS
+        camera = get_shared_dxgi_camera()
+        last: np.ndarray | None = None
+        while self._running:
+            t0 = time.monotonic()
+            try:
+                frame = camera.grab()
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("dxcam.grab() raised: %s", exc)
+                frame = None
+
+            if frame is None:
+                # No new frame since last grab — reuse last frame so the
+                # preview remains responsive at the requested FPS.
+                frame = last
+            else:
+                last = frame
+
+            if frame is not None:
+                frame = cv2.resize(
+                    frame, (640, 360), interpolation=cv2.INTER_LINEAR,
+                )
+                self._on_frame(frame)
+
+            elapsed = time.monotonic() - t0
+            rem = interval - elapsed
+            if rem > 0:
+                time.sleep(rem)
 
     def _loop_device(self) -> None:
         idx = self._cfg.get("index", 0)

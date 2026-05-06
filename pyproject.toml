@@ -24,6 +24,15 @@ dependencies = [
     "keyboard>=0.13; sys_platform == 'win32'",
     "pyserial>=3.5",
     "av>=12.0",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+# DXGI/Desktop Duplication-based screen capture (Windows-only).
+# Avoids GDI BitBlt cursor-jitter and is significantly cheaper on CPU than mss.
+# Install with:  pip install -e .[screen-fast]
+screen-fast = [
+    "dxcam>=0.0.5; sys_platform == 'win32'",
 ]
 
 [project.scripts]

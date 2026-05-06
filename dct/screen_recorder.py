@@ -68,6 +68,50 @@ _TIMESTAMPS_SCHEMA = pa.schema([
 ])
 
 
+# ── Shared DXGI camera ─────────────────────────────────────────────────────
+#
+# dxcam.create() internally caches one camera per (device, output) tuple.
+# Repeat calls return the *same* instance and warn if the parameters differ.
+# Manually `del`-ing the camera is fragile: comtypes has been observed to
+# raise access-violations during GC release of the underlying D3D11 pointer.
+#
+# The preview source and the screen recorder are mutually exclusive (preview
+# stops before record starts, and vice-versa), so a single shared camera is
+# sufficient and avoids both the duplicate-create warning and the COM GC
+# crashes.  We never delete it during the process lifetime.
+_dxgi_camera = None  # type: ignore[var-annotated]
+_dxgi_camera_lock = threading.Lock()
+
+
+def get_shared_dxgi_camera():
+    """Return a process-wide :class:`dxcam.DXCamera` (BGR), creating once.
+
+    Raises
+    ------
+    RuntimeError
+        If ``dxcam`` is missing, or DXGI duplication is unavailable on the
+        host (e.g. running over Remote Desktop on a headless GPU).
+    """
+    global _dxgi_camera
+    with _dxgi_camera_lock:
+        if _dxgi_camera is not None:
+            return _dxgi_camera
+        try:
+            import dxcam  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RuntimeError(
+                "dxcam is not installed. Run: pip install -e .[screen-fast]",
+            ) from exc
+        cam = dxcam.create(output_color="BGR")
+        if cam is None:
+            raise RuntimeError(
+                "dxcam.create() returned None — DXGI duplication unavailable "
+                "(e.g. running over Remote Desktop or no compatible GPU).",
+            )
+        _dxgi_camera = cam
+        return _dxgi_camera
+
+
 def _write_timestamps(path: Path, timestamps: list[float]) -> None:
     table = pa.table(
         {
@@ -241,6 +285,253 @@ class ScreenRecorder:
     @property
     def has_error(self) -> bool:
         return self._error is not None
+
+
+class DxgiScreenRecorder:
+    """DXGI-based screen recorder (Windows only, requires ``dxcam``).
+
+    Drop-in replacement for :class:`ScreenRecorder` that uses the
+    Desktop Duplication API instead of GDI ``BitBlt``. Major upsides:
+
+    * Capturing the desktop no longer kicks the hardware mouse-cursor overlay
+      out of its hardware path on every frame — the live cursor stops jittering
+      while recording is in progress.
+    * ~3-5x lower CPU load at the same resolution / fps.
+    * Higher upper bound on frame rate.
+
+    Notes:
+
+    * Requires ``dxcam`` (``pip install dxcam``); install via the
+      ``screen-fast`` extra.
+    * Only the primary display (``output_idx=0``) is captured by default.
+    * If the LiftOff window cannot be found we fall back to the full output.
+    """
+
+    def __init__(
+        self,
+        output_path: Path,
+        window_title: str,
+        fps: int = 60,
+        target_w: int = 1280,
+        target_h: int = 720,
+    ):
+        self._output = output_path
+        self._ts_path = output_path.parent / "video_timestamps.parquet"
+        self._title = window_title
+        self._fps = fps
+        self._target_w = target_w
+        self._target_h = target_h
+        self._thread: threading.Thread | None = None
+        self._running = False
+        self.frames_written = 0
+        self.actual_fps: float = float(fps)
+        self._error: Exception | None = None
+        self.latest_frame_bgr: np.ndarray | None = None
+
+    def start(self) -> None:
+        # Validate dxcam availability up-front so the caller can fall back.
+        try:
+            import dxcam  # type: ignore[import-not-found]  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError(
+                "dxcam is not installed. Run: pip install -e .[screen-fast]",
+            ) from exc
+
+        self._running = True
+        self._thread = threading.Thread(target=self._record_loop, daemon=True)
+        self._thread.start()
+        _log.info(
+            "DXGI screen recorder started: %dx%d@%dfps → %s",
+            self._target_w, self._target_h, self._fps, self._output.name,
+        )
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=30)
+        if self._error:
+            _log.error("DXGI screen recorder error: %s", self._error)
+        else:
+            _log.info(
+                "DXGI screen recorder stopped: %d frames @ %.1f fps",
+                self.frames_written, self.actual_fps,
+            )
+
+    def _record_loop(self) -> None:
+        try:
+            camera = get_shared_dxgi_camera()
+
+            out_container, out_stream = _make_av_writer(
+                self._output, self._fps, self._target_w, self._target_h,
+            )
+            interval = 1.0 / self._fps
+            frame_timestamps: list[float] = []
+
+            pts_written = 0
+            t_start = time.monotonic()
+            last_frame: np.ndarray | None = None
+            _last_fps_log = t_start
+            _frames_at_last_log = 0
+
+            region_cache: tuple[int, int, int, int] | None = None
+            region_cache_at = 0.0
+
+            while self._running:
+                t0 = time.monotonic()
+
+                if t0 - region_cache_at > 5.0:
+                    win = _get_window_region(self._title)
+                    if win is None:
+                        region_cache = None
+                        _log.debug(
+                            "Window '%s' not found, capturing full output",
+                            self._title,
+                        )
+                    else:
+                        l = int(win["left"])
+                        tt = int(win["top"])
+                        r = l + int(win["width"])
+                        b = tt + int(win["height"])
+                        # Clamp negatives — pygetwindow returns them for
+                        # minimised windows; dxcam rejects out-of-bounds.
+                        if r > l and b > tt and l >= 0 and tt >= 0:
+                            region_cache = (l, tt, r, b)
+                        else:
+                            region_cache = None
+                    region_cache_at = t0
+
+                ts_wall = time.time()
+                try:
+                    frame = (
+                        camera.grab(region=region_cache)
+                        if region_cache is not None
+                        else camera.grab()
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # Region might be out of bounds after window move —
+                    # invalidate cache and reuse last frame this tick.
+                    _log.debug("dxcam.grab() raised: %s — invalidating region", exc)
+                    region_cache = None
+                    region_cache_at = 0.0
+                    frame = None
+
+                if frame is None:
+                    # No new frame since last grab → reuse last to keep
+                    # the timeline locked to wall-clock. If we have nothing
+                    # at all yet, just wait one tick.
+                    if last_frame is None:
+                        time.sleep(interval)
+                        continue
+                    frame = last_frame
+                else:
+                    last_frame = frame
+
+                if frame.shape[1] != self._target_w or frame.shape[0] != self._target_h:
+                    frame = cv2.resize(frame, (self._target_w, self._target_h))
+
+                self.latest_frame_bgr = frame
+
+                now = time.monotonic()
+                slots_due = int((now - t_start) / interval) + 1
+
+                while pts_written < slots_due:
+                    _av_write_frame(out_stream, out_container, frame, pts_written)
+                    frame_timestamps.append(ts_wall)
+                    self.frames_written += 1
+                    pts_written += 1
+
+                if now - _last_fps_log >= 5.0:
+                    elapsed_log = now - _last_fps_log
+                    fps_log = (self.frames_written - _frames_at_last_log) / elapsed_log
+                    _log.info(
+                        "DXGI recorder: %.1f fps  (written=%d  slots_due=%d)",
+                        fps_log, self.frames_written, slots_due,
+                    )
+                    _last_fps_log = now
+                    _frames_at_last_log = self.frames_written
+
+                elapsed = time.monotonic() - t0
+                sleep = interval - elapsed
+                if sleep > 0:
+                    time.sleep(sleep)
+
+            _av_close(out_stream, out_container)
+            _write_timestamps(self._ts_path, frame_timestamps)
+
+            if len(frame_timestamps) > 1:
+                duration = frame_timestamps[-1] - frame_timestamps[0]
+                if duration > 0:
+                    self.actual_fps = round(self.frames_written / duration, 1)
+
+        except Exception as exc:
+            self._error = exc
+            _log.exception("DXGI screen recorder crashed: %s", exc)
+
+    @property
+    def has_error(self) -> bool:
+        return self._error is not None
+
+
+def make_screen_recorder(
+    output_path: Path,
+    window_title: str,
+    *,
+    fps: int = 60,
+    target_w: int = 1280,
+    target_h: int = 720,
+    backend: str | None = None,
+):
+    """Factory: choose between DXGI (``dxcam``) and GDI (``mss``) screen recorders.
+
+    ``backend`` selects:
+
+    * ``"auto"`` (default): try DXGI on Windows when ``dxcam`` is importable,
+      otherwise fall back to mss.
+    * ``"dxgi"`` / ``"dxcam"``: force DXGI; raises if ``dxcam`` is missing.
+    * ``"mss"`` / ``"gdi"``: force the legacy mss-based recorder.
+
+    If ``backend`` is ``None`` the value of
+    ``settings.screen_capture_backend`` is used.
+    """
+    from dct.config import settings as _s
+
+    requested = (backend or _s.screen_capture_backend or "auto").lower()
+
+    if requested in ("mss", "gdi"):
+        return ScreenRecorder(
+            output_path, window_title,
+            fps=fps, target_w=target_w, target_h=target_h,
+        )
+
+    if requested in ("dxgi", "dxcam", "auto"):
+        if sys.platform == "win32":
+            try:
+                import dxcam  # type: ignore[import-not-found]  # noqa: F401
+                return DxgiScreenRecorder(
+                    output_path, window_title,
+                    fps=fps, target_w=target_w, target_h=target_h,
+                )
+            except ImportError:
+                if requested == "auto":
+                    _log.info(
+                        "dxcam not installed — using mss screen recorder. "
+                        "Install with: pip install -e .[screen-fast]",
+                    )
+                else:
+                    raise RuntimeError(
+                        "screen_capture_backend='dxgi' but dxcam is not installed. "
+                        "Run: pip install -e .[screen-fast]",
+                    )
+        elif requested != "auto":
+            raise RuntimeError(
+                f"screen_capture_backend='{requested}' is Windows-only.",
+            )
+
+    # Fallback / non-Windows / dxcam unavailable in auto mode
+    return ScreenRecorder(
+        output_path, window_title,
+        fps=fps, target_w=target_w, target_h=target_h,
+    )
 
 
 def _open_capture(device_index: int) -> cv2.VideoCapture:

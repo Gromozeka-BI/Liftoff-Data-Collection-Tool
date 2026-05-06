@@ -22,6 +22,7 @@ from dct.receivers.button_api import ButtonAPI
 from dct.rh_simulator import RHSimulator
 from dct.screen_recorder import (
     ScreenRecorder, CaptureDeviceRecorder, PyAvCaptureRecorder,
+    make_screen_recorder,
     list_all_video_device_names, is_virtual_device,
 )
 from dct.session import create_session, copy_track, load_track
@@ -268,7 +269,7 @@ class LiveDataSource(QObject):
                         target_h=settings.screen_height,
                     )
             else:
-                self._recorder = ScreenRecorder(
+                self._recorder = make_screen_recorder(
                     self._session_dir / "video.mp4",
                     settings.screen_window_title,
                     fps=settings.screen_fps,
@@ -714,6 +715,43 @@ class ReplayDataSource(QObject):
                     self._ev_idx = max(0, self._ev_idx - 1)
                 self._events.pop(i)
                 break
+        self._rebuild_event_arrays()
+        self.save_events()
+        self.events_changed.emit(list(self._events))
+
+    def update_event(
+        self,
+        seq: int,
+        *,
+        ts_wall: float | None = None,
+        gate_id: int | None = None,
+        event_type: str | None = None,
+        lap_num: int | None = None,
+    ) -> None:
+        """Modify fields of a single event keyed by ``seq``.
+
+        Re-sorts by ``ts_wall`` if needed and recomputes ``_ev_idx`` so playback
+        does not re-fire the moved event when shuffled around the playhead.
+        """
+        for ev in self._events:
+            if ev.get("seq") == seq:
+                if ts_wall is not None:
+                    ev["ts_wall"] = float(ts_wall)
+                if gate_id is not None:
+                    ev["gate_id"] = int(gate_id)
+                if event_type is not None:
+                    ev["event_type"] = str(event_type)
+                if lap_num is not None:
+                    ev["lap_num"] = int(lap_num)
+                break
+        else:
+            return
+
+        self._events.sort(key=lambda e: e["ts_wall"])
+        cur_ts = self.current_ts
+        self._ev_idx = int(
+            np.searchsorted([e["ts_wall"] for e in self._events], cur_ts),
+        )
         self._rebuild_event_arrays()
         self.save_events()
         self.events_changed.emit(list(self._events))

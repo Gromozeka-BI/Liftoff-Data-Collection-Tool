@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     screen_width: int = 1280
     screen_height: int = 720
     screen_window_title: str = "Liftoff"
+    # Capture backend: "auto" tries DXGI (dxcam) on Windows, falls back to mss.
+    # Force one with: DCT_SCREEN_CAPTURE_BACKEND=mss   or   =dxgi
+    screen_capture_backend: str = "auto"
 
     # Mock RH gate detection
     rh_gate_radius: float = 2.0  # metres — matches track check_radius

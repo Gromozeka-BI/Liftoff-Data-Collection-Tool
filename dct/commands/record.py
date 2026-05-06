@@ -19,7 +19,7 @@ from dct.log import setup_logging, get_logger
 _log = get_logger("record")
 from dct.receivers.liftoff_udp import LiftoffUDPReceiver
 from dct.receivers.button_api import ButtonAPI
-from dct.screen_recorder import ScreenRecorder
+from dct.screen_recorder import ScreenRecorder, make_screen_recorder
 from dct.rh_simulator import RHSimulator
 from dct.session import create_session, finalize_meta, copy_track, load_track
 from dct.storage.writer import TelemetryWriter, EventsWriter
@@ -108,7 +108,7 @@ def record(pilot: str, drone: str, track: str, purpose: str, no_video: bool, no_
     # --- Screen recorder ---
     recorder: ScreenRecorder | None = None
     if not no_video:
-        recorder = ScreenRecorder(
+        recorder = make_screen_recorder(
             session_dir / "video.mp4",
             settings.screen_window_title,
             fps=settings.screen_fps,

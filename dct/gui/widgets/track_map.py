@@ -1,4 +1,4 @@
-"""2-D top-down track map.
+"""2-D top-down track map with optional HUD overlay.
 
 Форма ворот — буква Н:
   - левая / правая стойки — вертикальные линии на ±hw
@@ -22,7 +22,10 @@ from typing import Any
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QPointF, QRectF
-from PyQt6.QtGui import QColor, QPainterPath, QBrush, QPen, QFont, QTransform
+from PyQt6.QtGui import (
+    QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QTransform,
+)
+from PyQt6.QtWidgets import QGraphicsItem
 
 from dct.gui import theme
 
@@ -143,6 +146,141 @@ class WorldTextItem(pg.GraphicsObject):
         p.restore()
 
 
+class MapHUDItem(QGraphicsItem):
+    """Translucent HUD pinned to the top-right corner of the map's viewport.
+
+    Renders short telemetry lines (Spd / Alt / Bat / Pos) and the localizer
+    progress + uncertainty in screen-space pixels (does not zoom with the map).
+    """
+
+    PADDING = 10
+    LINE_H = 22
+    HEAD_H = 18
+    BG_ALPHA = 0.65
+
+    def __init__(self, plot_widget: "TrackMapWidget"):
+        super().__init__()
+        self._pw = plot_widget
+        self.setZValue(50)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self._lines: list[tuple[str, str, str]] = []
+        self._race_mode: bool = False
+        self._show_loc: bool = True
+        self._size_w = 220
+        self._size_h = 120
+
+    # ── public API ────────────────────────────────────────────────────────
+
+    def set_race_mode(self, on: bool) -> None:
+        if on != self._race_mode:
+            self._race_mode = on
+            self.prepareGeometryChange()
+            self.update()
+
+    def set_visible_loc(self, on: bool) -> None:
+        self._show_loc = on
+        self.update()
+
+    def set_data(self, frame: dict | None, loc: tuple[float, float] | None) -> None:
+        lines: list[tuple[str, str, str]] = []
+        if frame:
+            spd = (frame.get("vel_x", 0.0) ** 2 + frame.get("vel_y", 0.0) ** 2 + frame.get("vel_z", 0.0) ** 2) ** 0.5
+            lines.append(("Spd", f"{spd:.1f} m/s", theme.TEXT))
+            lines.append(("Alt", f"{frame.get('pos_y', 0.0):.1f} m", theme.TEXT))
+            lines.append(("Bat", f"{frame.get('bat_v', 0.0):.1f} V", theme.TEXT))
+            lines.append((
+                "Pos",
+                f"X{frame.get('pos_x', 0.0):.1f}  Z{frame.get('pos_z', 0.0):.1f}",
+                theme.DIM,
+            ))
+        if self._show_loc and loc is not None:
+            progress, sigma = loc
+            lines.append((
+                "Loc",
+                f"{progress * 100:.0f}%  σ±{sigma:.1f} m",
+                theme.LOCALIZER,
+            ))
+        self._lines = lines
+        self.prepareGeometryChange()
+        self.update()
+
+    # ── QGraphicsItem ─────────────────────────────────────────────────────
+
+    def boundingRect(self) -> QRectF:
+        rows = max(1, len(self._lines))
+        line_h = self.LINE_H + (4 if self._race_mode else 0)
+        h = self.PADDING * 2 + self.HEAD_H + rows * line_h
+        w = 280 if self._race_mode else 220
+        self._size_w, self._size_h = w, h
+        return QRectF(-w, 0, w, h)
+
+    def paint(self, p: QPainter, *args) -> None:  # noqa: D401
+        if not self._lines:
+            return
+        try:
+            rect = self.boundingRect()
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+            bg = QColor(theme.PANEL)
+            bg.setAlphaF(self.BG_ALPHA)
+            p.setBrush(QBrush(bg))
+            p.setPen(QPen(QColor(theme.BORDER), 1))
+            p.drawRoundedRect(rect, 6, 6)
+
+            font_head = QFont("Segoe UI")
+            font_head.setBold(True)
+            font_head.setPixelSize(
+                theme.FONT_HEAD if not self._race_mode else theme.FONT_HUD_RACE - 4,
+            )
+            p.setFont(font_head)
+            p.setPen(QColor(theme.DIM))
+            p.drawText(
+                QRectF(rect.x() + self.PADDING, rect.y() + self.PADDING - 2,
+                       rect.width(), self.HEAD_H),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                "DCT HUD",
+            )
+
+            font = QFont("Segoe UI")
+            font.setPixelSize(theme.FONT_HUD_RACE if self._race_mode else theme.FONT_HUD)
+            font.setBold(True)
+            p.setFont(font)
+
+            line_h = self.LINE_H + (4 if self._race_mode else 0)
+            for i, (label, value, color) in enumerate(self._lines):
+                y = rect.y() + self.PADDING + self.HEAD_H + i * line_h
+                label_rect = QRectF(rect.x() + self.PADDING, y, 56, line_h)
+                value_rect = QRectF(
+                    rect.x() + self.PADDING + 56, y,
+                    rect.width() - self.PADDING * 2 - 56, line_h,
+                )
+                p.setPen(QColor(theme.DIM))
+                p.drawText(
+                    label_rect,
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    label,
+                )
+                p.setPen(QColor(color))
+                p.drawText(
+                    value_rect,
+                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                    value,
+                )
+        except Exception:  # noqa: BLE001 — never let a paint error spam Qt's loop
+            return
+
+    # ── positioning helper ────────────────────────────────────────────────
+
+    def reposition(self) -> None:
+        viewport = self._pw.viewport()
+        if viewport is None:
+            return
+        x = viewport.width() - self.PADDING
+        y = self.PADDING
+        scene_pos = self._pw.mapToScene(int(x), int(y))
+        self.setPos(scene_pos)
+
+
 class TrackMapWidget(pg.PlotWidget):
     TRAIL_SECS = 3.0
     TRAIL_MAX  = 400
@@ -184,6 +322,15 @@ class TrackMapWidget(pg.PlotWidget):
         self.addItem(self._loc_arrow)
         self._has_track = False
 
+        self._show_ref_path = True
+        self._show_loc_arrow = True
+        self._show_loc_trail = True
+
+        self._hud = MapHUDItem(self)
+        self.scene().addItem(self._hud)
+        self._hud.reposition()
+        self._hud.set_data(None, None)
+
     # ── setup ──────────────────────────────────────────────────────────────
 
     def _setup_plot(self) -> None:
@@ -214,6 +361,7 @@ class TrackMapWidget(pg.PlotWidget):
         pen = pg.mkPen(theme.DIM, width=2, style=Qt.PenStyle.DashLine)
         self._ref_path_item = self.plot(xa, za, pen=pen)
         self._ref_path_item.setZValue(-2)
+        self._ref_path_item.setVisible(self._show_ref_path)
 
     def clear_localizer_overlay(self) -> None:
         self._loc_trail_x.clear()
@@ -225,15 +373,55 @@ class TrackMapWidget(pg.PlotWidget):
         """Оценка позиции по стикам: короткий трейл + стрелка по направлению движения."""
         self._loc_trail_x.append(px)
         self._loc_trail_z.append(pz)
-        self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
+        if self._show_loc_trail:
+            self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
+        else:
+            self._loc_trail_item.setData([], [])
         self._loc_arrow.setPos(px, pz)
-        self._loc_arrow.setOpacity(1.0)
+        self._loc_arrow.setOpacity(1.0 if self._show_loc_arrow else 0.0)
         if len(self._loc_trail_x) >= 2:
             dx = self._loc_trail_x[-1] - self._loc_trail_x[-2]
             dz = self._loc_trail_z[-1] - self._loc_trail_z[-2]
             if dx * dx + dz * dz > 1e-8:
                 tang_deg = math.degrees(math.atan2(dz, dx))
                 self._loc_arrow.setStyle(angle=90 - tang_deg)
+
+    # ── visibility toggles ────────────────────────────────────────────────
+
+    def set_reference_path_visible(self, on: bool) -> None:
+        self._show_ref_path = bool(on)
+        if self._ref_path_item is not None:
+            self._ref_path_item.setVisible(self._show_ref_path)
+
+    def set_localizer_arrow_visible(self, on: bool) -> None:
+        self._show_loc_arrow = bool(on)
+        self._loc_arrow.setOpacity(1.0 if (on and len(self._loc_trail_x) > 0) else 0.0)
+
+    def set_localizer_trail_visible(self, on: bool) -> None:
+        self._show_loc_trail = bool(on)
+        if not on:
+            self._loc_trail_item.setData([], [])
+        else:
+            self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
+
+    # ── HUD ───────────────────────────────────────────────────────────────
+
+    def update_hud(self, frame: dict | None, loc: tuple[float, float] | None) -> None:
+        self._hud.set_data(frame, loc)
+        self._hud.reposition()
+
+    def set_hud_visible(self, on: bool) -> None:
+        self._hud.setVisible(bool(on))
+
+    def set_hud_race_mode(self, on: bool) -> None:
+        self._hud.set_race_mode(on)
+        self._hud.reposition()
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        hud = getattr(self, "_hud", None)
+        if hud is not None:
+            hud.reposition()
 
     def setup_track(self, track_data: dict[str, Any]) -> None:
         self.clear_reference_path()

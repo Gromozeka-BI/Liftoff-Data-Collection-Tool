@@ -1,0 +1,11 @@
+{
+  "track_id": "track-002",
+  "profile": "default",
+  "built_at": "2026-05-06T06:23:55+00:00",
+  "source": "C:\\Users\\Gromozeka\\YandexDisk\\Магистратура\\Диплом\\DCT\\dct\\localization\\reference.npz",
+  "lap_index": null,
+  "smooth_w": 5,
+  "track_length_m": 322.7569222627094,
+  "frames": 3434,
+  "metrics": {}
+}

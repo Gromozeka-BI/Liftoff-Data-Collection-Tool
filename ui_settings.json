@@ -17,12 +17,29 @@
   "drone": "MadTrainer",
   "rate": "Gromozeka_rate",
   "camera": "45 deg / 130 FOV",
-  "track": "MAD FGDR 2026 Abu-Dhabi TeamRace",
+  "track": "Первая трасса",
   "ds_mode": "both",
   "com_port": "COM3",
-  "video_source_index": 1,
+  "video_source_index": 0,
   "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_4",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_1.1",
+  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_4",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
-  "localizer_enabled": true
+  "localizer_enabled": true,
+  "race": {
+    "pip_pos": [
+      77,
+      27
+    ]
+  },
+  "window": {
+    "geometry": "AdnQywADAAAAAAeA////+AAADv8AAAQPAAAJKgAAAN4AAA4pAAADrQAAAAICAAAAB4AAAAeAAAAAFwAADv8AAAQP",
+    "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
+    "split_content": "AAAA/wAAAAEAAAACAAAC6AAAAfAAAAAAAwEAAAABAA==",
+    "split_right": "AAAA/wAAAAEAAAACAAACOgAAAiAAAAAAAwEAAAACAA==",
+    "screen_name": "ARZOPA"
+  },
+  "sidebar": {
+    "collapsed": false,
+    "width": 280
+  }
 }

@@ -25,7 +25,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QCheckBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -35,17 +35,17 @@ from dct.gui import ui_settings
 # ── Channel tables ─────────────────────────────────────────────────────────────
 
 _LF = [
-    ("T", "in_throttle", theme.STICK_T),
-    ("Y", "in_yaw",      theme.STICK_Y),
-    ("P", "in_pitch",    theme.STICK_P),
-    ("R", "in_roll",     theme.STICK_R),
+    ("Thr",   "in_throttle", theme.STICK_T),
+    ("Yaw",   "in_yaw",      theme.STICK_Y),
+    ("Pitch", "in_pitch",    theme.STICK_P),
+    ("Roll",  "in_roll",     theme.STICK_R),
 ]
 
 _RC = [
-    ("Thr", "ch3", "#ff9955"),
-    ("Yaw", "ch4", "#99ddff"),
-    ("Pit", "ch2", "#99ff99"),
-    ("Rol", "ch1", "#ffdd99"),
+    ("Thr",   "ch3", "#ff9955"),
+    ("Yaw",   "ch4", "#99ddff"),
+    ("Pitch", "ch2", "#99ff99"),
+    ("Roll",  "ch1", "#ffdd99"),
 ]
 
 _SW_CHANNELS = [
@@ -61,11 +61,14 @@ _SW_HIGH = "#33aa33"
 
 _WINDOW    = 10.0
 _MAXPTS    = 1200
-_RC_Y_MIN  = 800
-_RC_Y_MAX  = 2200
 _RC_CENTER = 1500.0
 _RC_HALF   = 500.0
 _PLOT_H    = 70
+
+
+def _normalize_rc(raw: np.ndarray) -> np.ndarray:
+    """Map RC PWM ([1000..2000] roughly) to the LF-style normalised range."""
+    return (raw - _RC_CENTER) / _RC_HALF
 
 
 class StickGraphsWidget(QWidget):
@@ -121,11 +124,13 @@ class StickGraphsWidget(QWidget):
         lf_vbox.setSpacing(2)
         lf_vbox.setContentsMargins(0, 0, 0, 0)
 
-        lf_hdr = QLabel("Liftoff")
-        lf_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lf_hdr.setStyleSheet(f"color: {theme.DIM}; font-size: 10px; font-weight: bold;")
-        lf_hdr.setFixedHeight(14)
-        lf_vbox.addWidget(lf_hdr)
+        self._lf_hdr = QLabel("Liftoff")
+        self._lf_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lf_hdr.setStyleSheet(
+            f"color: {theme.DIM}; font-size: 10px; font-weight: bold;",
+        )
+        self._lf_hdr.setFixedHeight(14)
+        lf_vbox.addWidget(self._lf_hdr)
 
         # ── RC column (hideable in merge mode) ────────────────────────────
         self._rc_col_widget = QWidget()
@@ -157,55 +162,90 @@ class StickGraphsWidget(QWidget):
             self._rc_merged[rc_fld] = rc_m
             lf_vbox.addWidget(lf_pw)
 
-            # RC plot
-            rc_pw = self._make_plot(_PLOT_H, y_lf=False, show_x=False)
+            # RC plot — uses the same normalised Y axis (-1..1) as the
+            # corresponding Liftoff plot so the two columns are visually
+            # aligned. Raw PWM values stay in self._rc_buf and are still
+            # written to disk; only the display is normalised.
+            rc_pw = self._make_plot(_PLOT_H, y_lf=True, show_x=False)
             rc_c  = rc_pw.plot([], [], pen=pg.mkPen(rc_clr, width=1.5))
             self._rc_curves[rc_fld] = rc_c
             self._rc_plots.append(rc_pw)
             self._all_plots.append(rc_pw)
             _set_axis_label(rc_pw, rc_lbl, rc_clr, side="left",
-                            ticks=[(2000, "2k"), (1500, "ctr"), (1000, "1k")])
+                            ticks=[(1, "1"), (0, "0"), (-1, "-1")])
             rc_vbox.addWidget(rc_pw)
 
         main_row.addWidget(lf_outer,            stretch=1)
         main_row.addWidget(self._rc_col_widget, stretch=1)
 
-        # ── Reverse panel (always visible, both LF and RC checkboxes) ────
+        # ── Reverse panel — clean grid: row label + LF chk + RC chk ──────
+        # Channel name lives in column 0 with a fixed width; checkboxes
+        # are text-less and centred in their own fixed-width columns.
+        # This keeps the indicator boxes vertically aligned regardless of
+        # font metrics or label length.
         inv_box = QGroupBox("Реверс")
         inv_box.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-        inv_lay = QVBoxLayout(inv_box)
-        inv_lay.setSpacing(3)
-        inv_lay.setContentsMargins(6, 4, 6, 4)
+        outer = QVBoxLayout(inv_box)
+        outer.setContentsMargins(6, 4, 6, 4)
+        outer.setSpacing(2)
 
-        # Sub-header
-        hdr_row = QHBoxLayout()
-        for txt in ("LF", "RC"):
-            lbl = QLabel(txt)
+        inv_grid = QGridLayout()
+        inv_grid.setHorizontalSpacing(8)
+        inv_grid.setVerticalSpacing(4)
+        inv_grid.setContentsMargins(0, 0, 0, 0)
+
+        _NAME_COL_W = 38
+        _CHK_COL_W  = 28
+
+        def _hdr(text: str) -> QLabel:
+            lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"color: {theme.DIM}; font-size: 9px;")
-            hdr_row.addWidget(lbl)
-        inv_lay.addLayout(hdr_row)
-        inv_lay.addSpacing(2)
+            lbl.setStyleSheet(
+                f"color: {theme.DIM}; font-size: 9px; font-weight: 700;",
+            )
+            return lbl
 
-        for (lf_lbl, lf_fld, _), (rc_lbl, rc_fld, _) in zip(_LF, _RC):
-            row = QHBoxLayout()
-            row.setSpacing(4)
+        inv_grid.addWidget(QLabel(""), 0, 0)
+        inv_grid.addWidget(_hdr("LF"), 0, 1)
+        inv_grid.addWidget(_hdr("RC"), 0, 2)
 
-            lf_chk = QCheckBox(lf_lbl)
-            lf_chk.setToolTip(f"Инвертировать {lf_lbl} (только отображение)")
+        inv_grid.setColumnMinimumWidth(0, _NAME_COL_W)
+        inv_grid.setColumnMinimumWidth(1, _CHK_COL_W)
+        inv_grid.setColumnMinimumWidth(2, _CHK_COL_W)
+
+        for r, ((lf_lbl, lf_fld, _), (rc_lbl, rc_fld, _)) in enumerate(
+            zip(_LF, _RC), start=1,
+        ):
+            name = QLabel(rc_lbl)  # short RC name as the row caption
+            name.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            name.setStyleSheet(f"color: {theme.DIM}; font-size: 11px;")
+            name.setMinimumWidth(_NAME_COL_W)
+            inv_grid.addWidget(name, r, 0)
+
+            lf_chk = QCheckBox()
+            lf_chk.setToolTip(
+                f"Инвертировать {lf_lbl} в Liftoff (только отображение)",
+            )
             lf_chk.stateChanged.connect(self._on_invert_changed)
             self._lf_inv[lf_fld] = lf_chk
+            inv_grid.addWidget(
+                lf_chk, r, 1, alignment=Qt.AlignmentFlag.AlignCenter,
+            )
 
-            rc_chk = QCheckBox(rc_lbl)
-            rc_chk.setToolTip(f"Инвертировать {rc_lbl} (только отображение)")
+            rc_chk = QCheckBox()
+            rc_chk.setToolTip(
+                f"Инвертировать {rc_lbl} в RC (только отображение)",
+            )
             rc_chk.stateChanged.connect(self._on_invert_changed)
             self._rc_inv[rc_fld] = rc_chk
+            inv_grid.addWidget(
+                rc_chk, r, 2, alignment=Qt.AlignmentFlag.AlignCenter,
+            )
 
-            row.addWidget(lf_chk)
-            row.addWidget(rc_chk)
-            inv_lay.addLayout(row)
-
-        inv_lay.addStretch(1)
+        outer.addLayout(inv_grid)
+        outer.addStretch(1)
         main_row.addWidget(inv_box)
         root.addLayout(main_row)
 
@@ -323,6 +363,7 @@ class StickGraphsWidget(QWidget):
     def _toggle_merge(self) -> None:
         self._merged = self._btn_merge.isChecked()
         self._rc_col_widget.setVisible(not self._merged)
+        self._lf_hdr.setText("Liftoff + RC" if self._merged else "Liftoff")
         for c in self._rc_merged.values():
             c.setVisible(self._merged)
         for c in self._comb_rc.values():
@@ -381,8 +422,10 @@ class StickGraphsWidget(QWidget):
                 raw = np.array(self._rc_buf[fld])[rc_mask]
                 if self._rc_inv[fld].isChecked():
                     raw = 2 * _RC_CENTER - raw   # mirror around 1500
-                self._rc_curves[fld].setData(rc_plt, raw)
-                normed = (raw - _RC_CENTER) / _RC_HALF
+                normed = _normalize_rc(raw)
+                # All RC views (column, merged overlay, combined) share the
+                # same normalised range so axes line up with Liftoff plots.
+                self._rc_curves[fld].setData(rc_plt, normed)
                 self._rc_merged[fld].setData(rc_plt if self._merged else [],
                                              normed if self._merged else [])
                 self._comb_rc[fld].setData(rc_plt if self._merged else [],
@@ -397,6 +440,10 @@ class StickGraphsWidget(QWidget):
 
     @staticmethod
     def _make_plot(height: int, y_lf: bool, show_x: bool) -> pg.PlotWidget:
+        # ``y_lf`` is kept for API symmetry — both LF and RC plots now use
+        # the same normalised −1…+1 Y axis so corresponding channel pairs
+        # share aligned axes.
+        del y_lf
         pw = pg.PlotWidget()
         pw.setBackground(theme.PANEL)
         pw.setFixedHeight(height)
@@ -407,8 +454,7 @@ class StickGraphsWidget(QWidget):
         vb = pw.getPlotItem().getViewBox()
         vb.disableAutoRange()
         vb.setAutoVisible(x=False, y=False)
-        y_range = (-1.05, 1.05) if y_lf else (_RC_Y_MIN, _RC_Y_MAX)
-        vb.setRange(yRange=y_range, xRange=(0, _WINDOW), padding=0)
+        vb.setRange(yRange=(-1.05, 1.05), xRange=(0, _WINDOW), padding=0)
         if not show_x:
             pw.getPlotItem().hideAxis("bottom")
         return pw
@@ -423,7 +469,9 @@ def _set_axis_label(
 ) -> None:
     ax = pw.getPlotItem().getAxis(side)
     ax.setLabel(label, color=color)
-    ax.setWidth(28)
+    # 36 px holds tick labels (-1, 0, 1) and the rotated full-name label
+    # ("Pitch", "Roll", etc.) without clipping at default font sizes.
+    ax.setWidth(36)
     ax.setTextPen(pg.mkPen(color))
     if ticks:
         ax.setTicks([ticks])

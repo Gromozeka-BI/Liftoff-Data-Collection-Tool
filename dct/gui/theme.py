@@ -15,6 +15,9 @@ DRONE   = "#4EC9B0"
 TRAIL   = "#2D7DD2"
 LOCALIZER = "#D7BA7D"
 LOC_TRAIL = "#8B7355"
+# Second localizer (RC sticks) in Liftoff+RC mode — distinct from sim (gold).
+LOCALIZER_RC = "#569CD6"
+LOC_TRAIL_RC = "#3D6FA3"
 GATE    = "#CE9178"
 GATE_SF = "#4EC9B0"
 

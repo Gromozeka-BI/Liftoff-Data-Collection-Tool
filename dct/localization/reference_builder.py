@@ -22,6 +22,7 @@ from dct.localization.lap_loader import (
     load_dct_sessions_dir,
 )
 from dct.localization.online_localizer import Reference
+from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1, physical_observation_matrix
 from dct.localization.reference_select import (
     evaluate_reference_quality,
     select_best_reference,
@@ -82,8 +83,34 @@ def auto_pick(laps: list[Lap], *, smooth_w: int = 5, progress_cb=None) -> int:
     return best
 
 
-def build(lap: Lap, *, smooth_w: int = 5) -> Reference:
-    """Build a :class:`Reference` from a single lap."""
+def build(lap: Lap, *, smooth_w: int = 5, rate_profile: dict | None = None) -> Reference:
+    """Build a :class:`Reference` from a single lap.
+
+    If ``rate_profile`` is omitted, loads ``<session>/rate_profile.json`` when
+    ``lap.session_dir`` is set and the file exists. Otherwise falls back to
+    legacy stick-based observations.
+    """
+    prof = rate_profile
+    if prof is None and lap.session_dir is not None:
+        rp = lap.session_dir / "rate_profile.json"
+        if rp.is_file():
+            try:
+                prof = json.loads(rp.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                _log.warning("Could not read rate profile: %s", rp)
+                prof = None
+
+    if isinstance(prof, dict) and prof.get("model") == "betaflight":
+        obs = physical_observation_matrix(lap.sticks, prof)
+        return Reference.build_from_features(
+            lap.t.copy(),
+            obs,
+            lap.pos.copy(),
+            smooth_w=smooth_w,
+            feature_kind=FEATURE_BETAFLIGHT_CLASSIC_V1,
+            rate_profile=prof,
+        )
+
     return Reference.build(
         t=lap.t.copy(),
         sticks=lap.sticks.copy(),
@@ -135,6 +162,7 @@ def save_for_track(
         "track_length_m": float(ref.L),
         "frames": int(ref.sticks_norm.shape[0]),
         "metrics": metrics or {},
+        "feature_kind": getattr(ref, "feature_kind", None) or "legacy_sticks",
     }
     try:
         meta_path.write_text(

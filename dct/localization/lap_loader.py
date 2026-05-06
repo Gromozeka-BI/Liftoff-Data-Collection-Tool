@@ -38,6 +38,7 @@ class Lap:
     pos: np.ndarray
     duration: float
     source_session: str = ""
+    session_dir: Path | None = None
 
     def __len__(self) -> int:
         return len(self.t)
@@ -232,6 +233,7 @@ def load_dct_session(
 
     for lap in laps:
         lap.source_session = session_path.name
+        lap.session_dir = session_path
 
     return laps, track
 
@@ -285,6 +287,10 @@ def load_dct_sessions_dir(
     all_laps = filter_anomalous_laps(all_laps)
     for i, lap in enumerate(all_laps, start=1):
         lap.index = i
+        if lap.session_dir is None and lap.source_session:
+            cand = dir_path / lap.source_session
+            if (cand / "telemetry.parquet").exists():
+                lap.session_dir = cand
     return all_laps, common_track or {}
 
 

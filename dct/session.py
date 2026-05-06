@@ -82,3 +82,39 @@ def load_track(session_dir: Path) -> dict[str, Any] | None:
         with open(p, encoding="utf-8") as f:
             return json.load(f)
     return None
+
+
+def snapshot_session_profiles(session_dir: Path, cfg: dict[str, Any]) -> None:
+    """Write ``rate_profile.json`` / ``camera_profile.json`` and merge ids into ``meta.json``.
+
+    Expects ``cfg["rate"]`` / ``cfg["camera"]`` as dicts from ``profiles/*/ *.json``
+    (same shape as ``SetupPage.build_cfg()`` rate/camera entries).
+    """
+    meta_updates: dict[str, Any] = {}
+    rate = cfg.get("rate")
+    if isinstance(rate, dict) and rate:
+        (session_dir / "rate_profile.json").write_text(
+            json.dumps(rate, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if rate.get("id") is not None:
+            meta_updates["rate_profile_id"] = rate.get("id")
+        if rate.get("name") is not None:
+            meta_updates["rate_profile_name"] = rate.get("name")
+
+    camera = cfg.get("camera")
+    if isinstance(camera, dict) and camera:
+        (session_dir / "camera_profile.json").write_text(
+            json.dumps(camera, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if camera.get("id") is not None:
+            meta_updates["camera_id"] = camera.get("id")
+        if camera.get("name") is not None:
+            meta_updates["camera_name"] = camera.get("name")
+
+    if not meta_updates:
+        return
+    meta = load_meta(session_dir)
+    meta.update(meta_updates)
+    _write_meta(session_dir, meta)

@@ -25,7 +25,7 @@ from dct.screen_recorder import (
     make_screen_recorder,
     list_all_video_device_names, is_virtual_device,
 )
-from dct.session import create_session, copy_track, load_track
+from dct.session import create_session, copy_track, load_track, snapshot_session_profiles
 from dct.storage.writer import TelemetryWriter, EventsWriter, RCChannelsWriter, TimelineWriter
 from dct.system_logger import SystemLogger
 
@@ -201,6 +201,8 @@ class LiveDataSource(QObject):
         )
         if cfg.get("track_path"):
             copy_track(self._session_dir, Path(cfg["track_path"]))
+
+        snapshot_session_profiles(self._session_dir, cfg)
 
         track_data = load_track(self._session_dir)
 

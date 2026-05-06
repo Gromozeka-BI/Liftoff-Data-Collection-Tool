@@ -11,18 +11,14 @@ import logging
 import numpy as np
 
 from dct.localization.lap_loader import Lap
-from dct.localization.online_localizer import Reference
 
 _log = logging.getLogger(__name__)
 
 
-def _build_reference(lap: Lap, *, smooth_w: int = 5) -> Reference:
-    return Reference.build(
-        t=lap.t.copy(),
-        sticks=lap.sticks.copy(),
-        pos=lap.pos.copy(),
-        smooth_w=smooth_w,
-    )
+def _build_reference(lap: Lap, *, smooth_w: int = 5):
+    from dct.localization import reference_builder as refbuild  # noqa: WPS433 — avoid import cycle
+
+    return refbuild.build(lap, smooth_w=smooth_w)
 
 
 def evaluate_reference_quality(

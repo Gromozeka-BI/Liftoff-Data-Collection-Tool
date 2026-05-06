@@ -1,11 +1,12 @@
 {
   "track_id": "track-001",
   "profile": "default",
-  "built_at": "2026-05-06T06:50:01+00:00",
-  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_1.1\\2026-05-05_pilot-Gromozeka_drone-MadTrainer_track-Первая трасса_session-002",
-  "lap_index": 8,
+  "built_at": "2026-05-06T14:55:23+00:00",
+  "source": "C:\\DroneTracker\\LiftOff\\Part_1\\2026-05-06_pilot-Gromozeka_drone-MadTrainer_track-track-001_session-023",
+  "lap_index": 2,
   "smooth_w": 5,
-  "track_length_m": 110.952770406851,
-  "frames": 1426,
-  "metrics": {}
+  "track_length_m": 114.86307724592197,
+  "frames": 1306,
+  "metrics": {},
+  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
 }

@@ -71,6 +71,38 @@ def _normalize_rc(raw: np.ndarray) -> np.ndarray:
     return (raw - _RC_CENTER) / _RC_HALF
 
 
+def rc_frame_to_sticks_norm(frame: dict, invert_rc: dict[str, bool] | None = None) -> list[float]:
+    """RC sample → ``[throttle, yaw, pitch, roll]`` in −1..1 (same mapping as plots).
+
+    Channel wiring matches :data:`_RC`: Thr→ch3, Yaw→ch4, Pitch→ch2, Roll→ch1.
+    ``invert_rc`` uses the same keys as ``get_invert_state()["rc"]`` (ch1..ch4).
+    """
+    inv = invert_rc or {}
+    out: list[float] = []
+    for _label, ch, _clr in _RC:
+        raw = float(frame.get(ch, _RC_CENTER))
+        if inv.get(ch, False):
+            raw = 2.0 * _RC_CENTER - raw
+        out.append((raw - _RC_CENTER) / _RC_HALF)
+    return out
+
+
+def lf_sticks_with_invert(frame: dict, invert_lf: dict[str, bool] | None = None) -> list[float]:
+    """Liftoff UDP row → ``[throttle, yaw, pitch, roll]`` with the same sign as stick plots.
+
+    ``invert_lf`` uses keys ``in_throttle``, ``in_yaw``, … like ``get_invert_state()["lf"]``.
+    Recorded telemetry stays raw; this is for display/localizer parity with the GUI.
+    """
+    inv = invert_lf or {}
+    out: list[float] = []
+    for _label, fld, _clr in _LF:
+        v = float(frame.get(fld, 0.0))
+        if inv.get(fld, False):
+            v = -v
+        out.append(v)
+    return out
+
+
 class StickGraphsWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

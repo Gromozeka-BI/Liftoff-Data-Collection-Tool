@@ -20,10 +20,17 @@ OnlineLocalizer — онлайн-локализация дрона по стик
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from dct.rate_features import (
+    FEATURE_BETAFLIGHT_CLASSIC_V1,
+    physical_observation_matrix,
+    physical_observation_row,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +62,12 @@ class LocalizerResult:
 # ---------------------------------------------------------------------------
 
 class Reference:
-    """Эталонный круг: нормализованные стики + позиции вдоль дуги."""
+    """Эталонный круг: нормализованные наблюдения + позиции вдоль дуги.
+
+    ``sticks_norm`` stores z-scored observations (legacy: smoothed sticks;
+    ``feature_kind=betaflight_classic_rpy_deg_s_v1``: smoothed
+    [thr, yaw°, pitch°, roll°] per row).
+    """
 
     def __init__(
         self,
@@ -65,14 +77,19 @@ class Reference:
         mean: np.ndarray,
         std: np.ndarray,
         smooth_w: int = 5,
+        *,
+        feature_kind: str | None = None,
+        rate_profile: dict | None = None,
     ):
         self.s = s                       # (N,) — дуговой параметр, м
         self.pos = pos                   # (N, 3) — xyz в метрах
-        self.sticks_norm = sticks_norm   # (N, 4) — нормализованные стики
-        self.mean = mean                 # (4,) — среднее стиков эталона
-        self.std = std                   # (4,) — std стиков эталона
+        self.sticks_norm = sticks_norm   # (N, 4) — z-scored observations
+        self.mean = mean                 # (4,) — mean before z-score
+        self.std = std                   # (4,) — std before z-score
         self.smooth_w = smooth_w
         self.L = float(s[-1])            # длина круга в метрах
+        self.feature_kind = feature_kind
+        self.rate_profile = rate_profile
 
     # ------------------------------------------------------------------
     def pos_at_s(self, s_query: float | np.ndarray) -> np.ndarray:
@@ -88,27 +105,57 @@ class Reference:
 
     # ------------------------------------------------------------------
     def normalize_sticks(self, sticks: np.ndarray) -> np.ndarray:
-        """Нормализовать входной вектор стиков так же, как эталон."""
-        sm = _smooth_box(np.atleast_2d(sticks), self.smooth_w)
+        """Z-score observations the same way as during :class:`Reference` build.
+
+        For ``feature_kind=betaflight_classic_rpy_deg_s_v1`` the input is still
+        raw ``[thr, yaw, pitch, roll]`` sticks in -1..1; they are mapped through
+        the Betaflight curve, box-smoothed, then z-scored.
+        """
+        x = np.atleast_2d(sticks)
+        if self.feature_kind == FEATURE_BETAFLIGHT_CLASSIC_V1:
+            if not self.rate_profile:
+                raise RuntimeError("rate_profile required for Betaflight feature mode")
+            obs = physical_observation_matrix(x, self.rate_profile)
+            sm = _smooth_box(obs, self.smooth_w)
+            return (sm - self.mean) / self.std
+        sm = _smooth_box(x, self.smooth_w)
         return (sm - self.mean) / self.std
 
     # ------------------------------------------------------------------
     def save(self, path: str | Path) -> None:
         """Сохранить эталон в .npz-файл."""
-        np.savez_compressed(
-            path,
-            s=self.s,
-            pos=self.pos,
-            sticks_norm=self.sticks_norm,
-            mean=self.mean,
-            std=self.std,
-            smooth_w=np.array(self.smooth_w),
-        )
+        payload: dict[str, np.ndarray] = {
+            "s": self.s,
+            "pos": self.pos,
+            "sticks_norm": self.sticks_norm,
+            "mean": self.mean,
+            "std": self.std,
+            "smooth_w": np.array(self.smooth_w),
+        }
+        if self.feature_kind:
+            payload["feature_kind"] = np.asarray(self.feature_kind)
+        if self.rate_profile:
+            jb = json.dumps(self.rate_profile, ensure_ascii=False).encode("utf-8")
+            payload["rate_profile_json"] = np.frombuffer(bytearray(jb), dtype=np.uint8)
+        np.savez_compressed(path, **payload)
 
     @classmethod
     def load(cls, path: str | Path) -> "Reference":
         """Загрузить эталон из .npz-файла."""
-        d = np.load(path)
+        d = np.load(path, allow_pickle=False)
+        feature_kind: str | None = None
+        if "feature_kind" in d.files:
+            fk = d["feature_kind"]
+            s = fk.item() if fk.ndim == 0 else str(fk.flat[0])
+            if isinstance(s, bytes):
+                s = s.decode("utf-8", errors="replace")
+            s = str(s).strip()
+            if s:
+                feature_kind = s
+        rate_profile: dict | None = None
+        if "rate_profile_json" in d.files:
+            arr = d["rate_profile_json"]
+            rate_profile = json.loads(arr.tobytes().decode("utf-8"))
         return cls(
             s=d["s"],
             pos=d["pos"],
@@ -116,6 +163,8 @@ class Reference:
             mean=d["mean"],
             std=d["std"],
             smooth_w=int(d["smooth_w"]),
+            feature_kind=feature_kind,
+            rate_profile=rate_profile,
         )
 
     @classmethod
@@ -143,8 +192,39 @@ class Reference:
         deltas = np.linalg.norm(np.diff(pos, axis=0), axis=1)
         s = np.concatenate([[0.0], np.cumsum(deltas)])
 
-        return cls(s=s, pos=pos, sticks_norm=sticks_norm,
-                   mean=mean, std=std, smooth_w=smooth_w)
+        return cls(
+            s=s, pos=pos, sticks_norm=sticks_norm,
+            mean=mean, std=std, smooth_w=smooth_w,
+            feature_kind=None,
+            rate_profile=None,
+        )
+
+    @classmethod
+    def build_from_features(
+        cls,
+        t: np.ndarray,
+        obs: np.ndarray,
+        pos: np.ndarray,
+        smooth_w: int = 5,
+        *,
+        feature_kind: str,
+        rate_profile: dict | None,
+    ) -> "Reference":
+        """Построить эталон из физических наблюдений (N,4), затем box-smooth + z-score."""
+        obs_sm = _smooth_box(np.atleast_2d(obs), smooth_w)
+        mean = obs_sm.mean(axis=0)
+        std = obs_sm.std(axis=0) + 1e-6
+        sticks_norm = (obs_sm - mean) / std
+
+        deltas = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+        s = np.concatenate([[0.0], np.cumsum(deltas)])
+
+        return cls(
+            s=s, pos=pos, sticks_norm=sticks_norm,
+            mean=mean, std=std, smooth_w=smooth_w,
+            feature_kind=feature_kind,
+            rate_profile=rate_profile,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -335,13 +415,20 @@ class OnlineLocalizer:
 
         sticks = np.asarray(sticks, dtype=float)
 
-        # накапливаем буфер для сглаживания (smooth_w последних фреймов)
-        self._prev_sticks_buffer.append(sticks)
+        if self.ref.feature_kind == FEATURE_BETAFLIGHT_CLASSIC_V1:
+            if not self.ref.rate_profile:
+                raise RuntimeError(
+                    "Reference uses Betaflight feature mode but rate_profile is missing in .npz",
+                )
+            obs_row = physical_observation_row(sticks, self.ref.rate_profile)
+            self._prev_sticks_buffer.append(obs_row)
+        else:
+            self._prev_sticks_buffer.append(sticks)
+
         w = self.ref.smooth_w
         if len(self._prev_sticks_buffer) > w:
             self._prev_sticks_buffer.pop(0)
 
-        # сглаживаем и нормализуем
         buf = np.array(self._prev_sticks_buffer)
         smoothed = buf.mean(axis=0)
         stick_norm = (smoothed - self.ref.mean) / self.ref.std

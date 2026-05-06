@@ -164,7 +164,8 @@ class SetupPage(QWidget):
 
         self._chk_localizer = QCheckBox("Enable on record")
         self._chk_localizer.setToolTip(
-            "Использовать стик-локализатор во время записи или Replay",
+            "Локализатор по эталону: Liftoff / Both — по стикам симулятора; "
+            "RC only — по нормализованным каналам приёмника (как на графиках).",
         )
         self._chk_localizer.stateChanged.connect(self._on_loc_state_changed)
         loc_lay.addWidget(self._chk_localizer)
@@ -352,18 +353,11 @@ class SetupPage(QWidget):
                     self, "Localizer", f"Файл эталона не найден:\n{loc_path}",
                 )
                 return None
-            if mode == _SRC_RC:
-                QMessageBox.warning(
-                    self, "Localizer",
-                    "Режим «RC only» не содержит стиков Liftoff — локализатор "
-                    "будет отключён в этой сессии.",
-                )
-
         loc_enabled = (
             self._chk_localizer.isChecked()
             and loc_path is not None
             and loc_path.is_file()
-            and mode in (_SRC_LIFTOFF, _SRC_BOTH)
+            and mode in (_SRC_LIFTOFF, _SRC_RC, _SRC_BOTH)
         )
         return {
             "pilot":        pilot_data.get("nickname", pilot_data.get("id", "?")),

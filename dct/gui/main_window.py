@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,11 @@ from dct.gui.widgets.bottom_strip import BottomStrip
 from dct.gui.widgets.sidebar import PAGE_REPLAY, PAGE_SETUP, Sidebar
 from dct.gui.widgets.replay_page import ReplayPage
 from dct.gui.widgets.setup_page import SetupPage
-from dct.gui.widgets.stick_graphs import StickGraphsWidget
+from dct.gui.widgets.stick_graphs import (
+    StickGraphsWidget,
+    lf_sticks_with_invert,
+    rc_frame_to_sticks_norm,
+)
 from dct.gui.widgets.top_bar import MODE_RACE, MODE_RECORD, MODE_REPLAY, TopBar
 from dct.gui.widgets.track_map import TrackMapWidget
 from dct.gui.widgets.video_pip import VideoPiP
@@ -68,8 +73,16 @@ class MainWindow(QMainWindow):
         self._current_track: dict | None = None
         self._latest_frame: dict | None = None
         self._localizer: OnlineLocalizer | None = None
+        self._localizer_rc: OnlineLocalizer | None = None
         self._prev_ts_wall: float | None = None
+        self._prev_rc_ts_wall: float | None = None
+        self._record_ds_mode: str = "liftoff"
         self._last_loc: tuple[float, float] | None = None
+        self._dual_loc_log_mono: float = 0.0
+        self._last_lf_sticks: list[float] | None = None
+        self._last_rc_sticks: list[float] | None = None
+        self._last_lf_loc: tuple[float, float, float, float] | None = None  # x,z,prog,sig
+        self._last_rc_loc: tuple[float, float, float, float] | None = None
         self._last_replay_path: str | None = None
         self._race_pip: VideoPiP | None = None
 
@@ -264,8 +277,15 @@ class MainWindow(QMainWindow):
 
     def _teardown_localizer(self) -> None:
         self._localizer = None
+        self._localizer_rc = None
         self._prev_ts_wall = None
+        self._prev_rc_ts_wall = None
         self._last_loc = None
+        self._dual_loc_log_mono = 0.0
+        self._last_lf_sticks = None
+        self._last_rc_sticks = None
+        self._last_lf_loc = None
+        self._last_rc_loc = None
         self._map.clear_localizer_overlay()
         self._map.update_hud(self._latest_frame, None)
 
@@ -294,23 +314,91 @@ class MainWindow(QMainWindow):
             self._localizer = OnlineLocalizer.from_file(p)
             self._localizer.reset()
             self._prev_ts_wall = None
+            self._localizer_rc = None
+            self._prev_rc_ts_wall = None
+            inv_lf0 = self._graphs.get_invert_state().get("lf", {})
+            if any(inv_lf0.values()):
+                _log.warning(
+                    "Localizer (Liftoff path) will apply GUI Liftoff reverse checkboxes to sticks. "
+                    "Reference .npz is normally built from raw telemetry (no LF reverses); if "
+                    "inverts are on, rebuild the reference with the same convention or turn LF "
+                    "reverses off for recording.",
+                )
+            ds = cfg.get("data_source", "liftoff")
+            if ds == "both":
+                self._localizer_rc = OnlineLocalizer.from_file(p)
+                self._localizer_rc.reset()
+                _log.info(
+                    "Dual localizer active (Liftoff + RC): two independent filters from %s — "
+                    "gold trail = sim sticks [T,Y,P,R], blue dotted = RC sticks (same .npz). "
+                    "Throttled INFO logs compare inputs and outputs.",
+                    p.name,
+                )
         except Exception as exc:
             _log.error("Localizer init failed: %s", exc)
             QMessageBox.warning(self, "Localizer", f"Не удалось загрузить эталон:\n{exc}")
             self._map.clear_reference_path()
             self._localizer = None
+            self._localizer_rc = None
 
     def _reset_localizer(self) -> None:
-        if self._localizer is None:
+        if self._localizer is None and self._localizer_rc is None:
             return
         try:
-            self._localizer.reset()
+            if self._localizer is not None:
+                self._localizer.reset()
+            if self._localizer_rc is not None:
+                self._localizer_rc.reset()
         except Exception:
             pass
         self._prev_ts_wall = None
+        self._prev_rc_ts_wall = None
+        self._dual_loc_log_mono = 0.0
+        self._last_lf_sticks = None
+        self._last_rc_sticks = None
+        self._last_lf_loc = None
+        self._last_rc_loc = None
         self._map.clear_localizer_overlay()
         self._last_loc = None
         self._map.update_hud(self._latest_frame, None)
+
+    def _log_dual_localizer_compare(self, ts_rc: float) -> None:
+        """Periodic log: stick deltas and position/progress deltas (Liftoff vs RC paths)."""
+        now = time.monotonic()
+        if now - self._dual_loc_log_mono < 1.0:
+            return
+        self._dual_loc_log_mono = now
+        lf_s = self._last_lf_sticks
+        rc_s = self._last_rc_sticks
+        lf_p = self._last_lf_loc
+        rc_p = self._last_rc_loc
+        if lf_s is None or rc_s is None or lf_p is None or rc_p is None:
+            _log.debug(
+                "loc_dual(wait) ts_rc=%.3f have_lf_sticks=%s have_rc_sticks=%s "
+                "have_lf_pose=%s have_rc_pose=%s",
+                ts_rc,
+                lf_s is not None,
+                rc_s is not None,
+                lf_p is not None,
+                rc_p is not None,
+            )
+            return
+        d = [round(rc_s[i] - lf_s[i], 4) for i in range(4)]
+        dx = rc_p[0] - lf_p[0]
+        dz = rc_p[1] - lf_p[1]
+        dp = rc_p[2] - lf_p[2]
+        dsig = rc_p[3] - lf_p[3]
+        _log.info(
+            "loc_dual ts_rc=%.3f Δsticks(rc-lf) T,Y,P,R=%s | "
+            "LF out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+            "RC out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+            "Δxz=(%.3f,%.3f) Δprog=%.4f Δσ=%.3f",
+            ts_rc,
+            d,
+            lf_p[0], lf_p[1], lf_p[2], lf_p[3],
+            rc_p[0], rc_p[1], rc_p[2], rc_p[3],
+            dx, dz, dp, dsig,
+        )
 
     def _on_loc_show_changed(self) -> None:
         s = self._setup_page.localizer_show_state()
@@ -371,10 +459,12 @@ class MainWindow(QMainWindow):
         self._graphs.set_time_zero(_time.time())
 
         ds_mode = cfg.get("data_source", "liftoff")
+        self._record_ds_mode = ds_mode
         self._live = LiveDataSource(self)
         self._live.telemetry_updated.connect(self._on_telemetry)
         self._live.telemetry_batch.connect(self._graphs.update_batch)
         self._live.rc_batch.connect(self._graphs.update_rc_batch)
+        self._live.rc_batch.connect(self._on_rc_batch_localizer)
         self._live.rc_status_changed.connect(self._setup_page.set_rc_status)
         self._live.event_fired.connect(self._on_event)
         self._live.stats_updated.connect(self._on_stats)
@@ -627,7 +717,11 @@ class MainWindow(QMainWindow):
     def _on_telemetry(self, frame: dict) -> None:
         self._latest_frame = frame
         self._map.update_drone(frame)
-        if self._mode == MODE_RECORD and self._localizer is not None:
+        if (
+            self._mode == MODE_RECORD
+            and self._localizer is not None
+            and self._record_ds_mode in ("liftoff", "both")
+        ):
             ts = float(frame["ts_wall"])
             prev = self._prev_ts_wall
             dt = (ts - prev) if prev is not None else None
@@ -635,23 +729,71 @@ class MainWindow(QMainWindow):
                 dt = None
             self._prev_ts_wall = ts
             try:
-                res = self._localizer.update(
-                    [
-                        frame["in_throttle"],
-                        frame["in_yaw"],
-                        frame["in_pitch"],
-                        frame["in_roll"],
-                    ],
-                    dt,
-                )
+                inv_lf = self._graphs.get_invert_state().get("lf", {})
+                sticks_lf = lf_sticks_with_invert(frame, inv_lf)
+                if self._record_ds_mode == "both":
+                    self._last_lf_sticks = list(sticks_lf)
+                res = self._localizer.update(sticks_lf, dt)
                 self._map.update_localizer_estimate(
                     float(res.position_xyz[0]),
                     float(res.position_xyz[2]),
                 )
                 self._last_loc = (float(res.progress), float(res.uncertainty_m))
+                if self._record_ds_mode == "both":
+                    self._last_lf_loc = (
+                        float(res.position_xyz[0]),
+                        float(res.position_xyz[2]),
+                        float(res.progress),
+                        float(res.uncertainty_m),
+                    )
             except Exception as exc:
                 _log.warning("Localizer update failed: %s", exc)
         self._map.update_hud(frame, self._last_loc)
+
+    @pyqtSlot(list)
+    def _on_rc_batch_localizer(self, frames: list) -> None:
+        """Drive PF from RC (RC-only) or second PF from RC in Liftoff+RC (dual compare)."""
+        if self._mode != MODE_RECORD:
+            return
+        ds = self._record_ds_mode
+        if ds not in ("rc", "both"):
+            return
+        loc = self._localizer if ds == "rc" else self._localizer_rc
+        if loc is None:
+            return
+        inv = self._graphs.get_invert_state().get("rc", {})
+        for frame in frames:
+            ts = float(frame["ts_wall"])
+            prev = self._prev_rc_ts_wall
+            dt = (ts - prev) if prev is not None else None
+            if dt is not None and (dt < 0 or dt > 2.0):
+                dt = None
+            self._prev_rc_ts_wall = ts
+            try:
+                sticks = rc_frame_to_sticks_norm(frame, inv)
+                res = loc.update(sticks, dt)
+                if ds == "rc":
+                    self._map.update_localizer_estimate(
+                        float(res.position_xyz[0]),
+                        float(res.position_xyz[2]),
+                    )
+                    self._last_loc = (float(res.progress), float(res.uncertainty_m))
+                else:
+                    self._last_rc_sticks = list(sticks)
+                    self._map.update_localizer_rc_estimate(
+                        float(res.position_xyz[0]),
+                        float(res.position_xyz[2]),
+                    )
+                    self._last_rc_loc = (
+                        float(res.position_xyz[0]),
+                        float(res.position_xyz[2]),
+                        float(res.progress),
+                        float(res.uncertainty_m),
+                    )
+                    self._log_dual_localizer_compare(ts)
+            except Exception as exc:
+                _log.warning("Localizer RC update failed: %s", exc)
+        self._map.update_hud(self._latest_frame, self._last_loc)
 
     @pyqtSlot(dict)
     def _on_event(self, ev: dict) -> None:

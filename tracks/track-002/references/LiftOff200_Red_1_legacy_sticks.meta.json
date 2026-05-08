@@ -1,0 +1,12 @@
+{
+  "track_id": "track-002",
+  "profile": "LiftOff200_Red_1_legacy_sticks",
+  "built_at": "2026-05-08T17:49:56+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_5\\2026-05-08_pilot-Gromozeka_drone-LiftOff_200_track-track-002_session-002",
+  "lap_index": 2,
+  "smooth_w": 5,
+  "track_length_m": 296.0005322709193,
+  "frames": 2407,
+  "metrics": {},
+  "feature_kind": "legacy_sticks"
+}

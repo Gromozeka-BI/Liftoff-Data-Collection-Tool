@@ -1,0 +1,22 @@
+==============================================================
+ANOVA RESULTS -- Experiment 3: Hyperparameter Optimization
+==============================================================
+Mode: RC+Rate  |  N_LAST_LAPS=3  |  process_noise_s=1.5
+
+Drone condition: same_drone
+--------------------------------------------------
+  obs_sigma effect:        F=135.012  p=0.0000  ***  eta2=0.486
+  process_noise_v effect:  F=  3.981  p=0.0033  **  eta2=0.022
+  preset effect:           F=  3.123  p=0.0254  *  eta2=0.013
+  2-way interaction sig×pnv: p=0.7282  n.s.  eta2=0.011
+  Variance explained: sigma=0.49  pnv=0.02  interaction=0.01
+
+Drone condition: cross_drone
+--------------------------------------------------
+  obs_sigma effect:        F=205.905  p=0.0000  ***  eta2=0.590
+  process_noise_v effect:  F=  4.355  p=0.0017  **  eta2=0.024
+  preset effect:           F= 16.000  p=0.0000  ***  eta2=0.063
+  2-way interaction sig×pnv: p=0.4993  n.s.  eta2=0.011
+  Variance explained: sigma=0.59  pnv=0.02  interaction=0.01
+
+Significance: * p<0.05  ** p<0.01  *** p<0.001  n.s. not significant

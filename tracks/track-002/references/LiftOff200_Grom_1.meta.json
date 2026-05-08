@@ -1,0 +1,12 @@
+{
+  "track_id": "track-002",
+  "profile": "LiftOff200_Grom_1",
+  "built_at": "2026-05-08T17:49:26+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_5\\2026-05-08_pilot-Gromozeka_drone-LiftOff_200_track-track-002_session-001",
+  "lap_index": 3,
+  "smooth_w": 5,
+  "track_length_m": 327.6293091403243,
+  "frames": 2597,
+  "metrics": {},
+  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
+}

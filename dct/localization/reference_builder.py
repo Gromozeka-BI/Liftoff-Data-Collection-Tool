@@ -35,6 +35,32 @@ _VALID_PROFILE_NAME = re.compile(r"[A-Za-z0-9_\-]{1,40}")
 
 _LEGACY_STICKS_SUFFIX = "_legacy_sticks"
 
+# Maps GUI invert-state keys (e.g. "in_roll") → column index in STICK_COLS
+_INVERT_KEY_TO_COL: dict[str, int] = {
+    "in_throttle": 0,
+    "in_yaw":      1,
+    "in_pitch":    2,
+    "in_roll":     3,
+}
+
+
+def _apply_invert_lf(sticks: np.ndarray, invert_lf: dict | None) -> np.ndarray:
+    """Return a copy of *sticks* with the GUI LF invert settings applied.
+
+    ``invert_lf`` uses the same key convention as
+    ``StickGraphsWidget.get_invert_state()["lf"]``:
+    ``{"in_throttle": bool, "in_yaw": bool, "in_pitch": bool, "in_roll": bool}``.
+    Channels with ``True`` are sign-flipped.  Returns ``sticks`` unchanged when
+    ``invert_lf`` is *None* or empty.
+    """
+    if not invert_lf:
+        return sticks
+    s = sticks.copy()
+    for key, col in _INVERT_KEY_TO_COL.items():
+        if invert_lf.get(key, False):
+            s[:, col] = -s[:, col]
+    return s
+
 
 def legacy_sticks_profile_name(profile: str) -> str:
     """Имя профиля для sidecar-эталона (сырые стики)."""
@@ -142,13 +168,27 @@ def auto_pick(laps: list[Lap], *, smooth_w: int = 5, progress_cb=None) -> int:
     return best
 
 
-def build(lap: Lap, *, smooth_w: int = 5, rate_profile: dict | None = None) -> Reference:
+def build(
+    lap: Lap,
+    *,
+    smooth_w: int = 5,
+    rate_profile: dict | None = None,
+    invert_lf: dict | None = None,
+) -> Reference:
     """Build a :class:`Reference` from a single lap.
+
+    ``invert_lf`` — GUI LF reverse-checkbox state (keys ``in_throttle`` …
+    ``in_roll``).  When provided, the same sign-flips that the live localizer
+    applies to incoming Liftoff telemetry are applied here so that the
+    reference feature vectors share the same convention.  Pass the value of
+    ``StickGraphsWidget.get_invert_state()["lf"]`` from the GUI.
 
     If ``rate_profile`` is omitted, loads ``<session>/rate_profile.json`` when
     ``lap.session_dir`` is set and the file exists. Otherwise falls back to
     legacy stick-based observations.
     """
+    sticks = _apply_invert_lf(lap.sticks, invert_lf)
+
     prof = rate_profile
     if prof is None and lap.session_dir is not None:
         rp = lap.session_dir / "rate_profile.json"
@@ -160,7 +200,7 @@ def build(lap: Lap, *, smooth_w: int = 5, rate_profile: dict | None = None) -> R
                 prof = None
 
     if isinstance(prof, dict) and prof.get("model") == "betaflight":
-        obs = physical_observation_matrix(lap.sticks, prof)
+        obs = physical_observation_matrix(sticks, prof)
         return Reference.build_from_features(
             lap.t.copy(),
             obs,
@@ -172,7 +212,7 @@ def build(lap: Lap, *, smooth_w: int = 5, rate_profile: dict | None = None) -> R
 
     return Reference.build(
         t=lap.t.copy(),
-        sticks=lap.sticks.copy(),
+        sticks=sticks,
         pos=lap.pos.copy(),
         smooth_w=smooth_w,
     )

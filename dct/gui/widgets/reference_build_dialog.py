@@ -83,13 +83,19 @@ class _AutoPickJob(QObject):
 
 
 class ReferenceBuildDialog(QDialog):
-    def __init__(self, track_id: str, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        track_id: str,
+        invert_lf: dict | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Build reference — {track_id}")
         self.setModal(True)
         self.resize(560, 520)
 
         self._track_id = track_id
+        self._invert_lf: dict = invert_lf or {}
         self._laps: list[Lap] = []
         self._summary: list[dict[str, Any]] = []
         self._best_idx: int | None = None
@@ -307,7 +313,7 @@ class ReferenceBuildDialog(QDialog):
         smooth_w = int(self._spin_smooth.value())
         profile = self._le_profile.text().strip() or "default"
         try:
-            ref = refbuild.build(lap, smooth_w=smooth_w)
+            ref = refbuild.build(lap, smooth_w=smooth_w, invert_lf=self._invert_lf)
             path = refbuild.save_for_track(
                 ref,
                 track_id=self._track_id,
@@ -318,6 +324,8 @@ class ReferenceBuildDialog(QDialog):
             )
             path_legacy: Path | None = None
             if getattr(ref, "feature_kind", None) == FEATURE_BETAFLIGHT_CLASSIC_V1:
+                # Legacy-sticks sidecar: raw sticks, no invert — kept for backward
+                # compatibility with the old particle filter convention.
                 ref_l = Reference.build(
                     t=lap.t.copy(),
                     sticks=lap.sticks.copy(),

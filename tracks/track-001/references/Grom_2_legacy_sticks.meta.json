@@ -1,0 +1,12 @@
+{
+  "track_id": "track-001",
+  "profile": "Grom_2_legacy_sticks",
+  "built_at": "2026-05-08T09:10:46+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_3\\2026-05-08_pilot-Gromozeka_drone-MadTrainer_track-track-001_session-003",
+  "lap_index": 7,
+  "smooth_w": 5,
+  "track_length_m": 105.83963708939254,
+  "frames": 1058,
+  "metrics": {},
+  "feature_kind": "legacy_sticks"
+}

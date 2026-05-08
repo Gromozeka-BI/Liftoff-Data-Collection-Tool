@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
@@ -104,6 +104,10 @@ def lf_sticks_with_invert(frame: dict, invert_lf: dict[str, bool] | None = None)
 
 
 class StickGraphsWidget(QWidget):
+    #: Emitted whenever any invert checkbox changes.
+    #: Payload is the full ``get_invert_state()`` dict.
+    invert_changed = pyqtSignal(dict)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumWidth(380)   # prevent layout collapse on narrow windows
@@ -380,7 +384,9 @@ class StickGraphsWidget(QWidget):
 
     def _on_invert_changed(self) -> None:
         self._redraw()
-        ui_settings.update("invert", self.get_invert_state())
+        state = self.get_invert_state()
+        ui_settings.update("invert", state)
+        self.invert_changed.emit(state)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

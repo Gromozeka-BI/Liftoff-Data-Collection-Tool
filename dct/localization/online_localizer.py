@@ -397,14 +397,24 @@ class OnlineLocalizer:
         self,
         sticks: list[float] | np.ndarray,
         dt: float | None,
+        rate_profile: dict | None = None,
     ) -> LocalizerResult:
         """Обновить оценку позиции по новому вектору стиков.
 
         Parameters
         ----------
-        sticks : [throttle, yaw, pitch, roll] в диапазоне -1..1
-        dt     : время с предыдущего вызова update(), сек.
-                 Передать None для первого вызова.
+        sticks       : [throttle, yaw, pitch, roll] в диапазоне -1..1
+        dt           : время с предыдущего вызова update(), сек.
+                       Передать None для первого вызова.
+        rate_profile : rate profile **текущей сессии** (dict с model="betaflight").
+                       Если передан — используется для sticks→setpoint вместо
+                       rate profile из референса.  Это позволяет корректно
+                       сравнивать сессии с разными настройками рейтов: один и
+                       тот же манёвр даёт одинаковый setpoint (deg/s) независимо
+                       от rate profile, поэтому нормализатор из референса
+                       остаётся применимым.
+                       Если None — используется rate profile из референса
+                       (поведение по умолчанию, обратная совместимость).
 
         Returns
         -------
@@ -416,11 +426,17 @@ class OnlineLocalizer:
         sticks = np.asarray(sticks, dtype=float)
 
         if self.ref.feature_kind == FEATURE_BETAFLIGHT_CLASSIC_V1:
-            if not self.ref.rate_profile:
+            # Use current-session rate profile when provided so that the
+            # same physical manoeuvre produces the same setpoint (deg/s)
+            # regardless of rate settings, making the reference reusable
+            # across different rate configurations.
+            active_prof = rate_profile if rate_profile is not None else self.ref.rate_profile
+            if not active_prof:
                 raise RuntimeError(
-                    "Reference uses Betaflight feature mode but rate_profile is missing in .npz",
+                    "Reference uses Betaflight feature mode but no rate_profile is available "
+                    "(neither from the reference .npz nor passed to update())",
                 )
-            obs_row = physical_observation_row(sticks, self.ref.rate_profile)
+            obs_row = physical_observation_row(sticks, active_prof)
             self._prev_sticks_buffer.append(obs_row)
         else:
             self._prev_sticks_buffer.append(sticks)

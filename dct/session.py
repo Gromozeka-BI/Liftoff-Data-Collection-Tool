@@ -53,7 +53,8 @@ def create_session(
 
 
 def load_meta(session_dir: Path) -> dict[str, Any]:
-    with open(session_dir / "meta.json", encoding="utf-8") as f:
+    # utf-8-sig strips the UTF-8 BOM that some editors / PowerShell may add
+    with open(session_dir / "meta.json", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -91,6 +92,11 @@ def snapshot_session_profiles(session_dir: Path, cfg: dict[str, Any]) -> None:
     (same shape as ``SetupPage.build_cfg()`` rate/camera entries).
     """
     meta_updates: dict[str, Any] = {}
+
+    # Persist the data-source mode so Replay can restore RC localizer when needed
+    if cfg.get("data_source"):
+        meta_updates["data_source"] = cfg["data_source"]
+
     rate = cfg.get("rate")
     if isinstance(rate, dict) and rate:
         (session_dir / "rate_profile.json").write_text(

@@ -70,6 +70,7 @@ class SetupPage(QWidget):
         self._recording = False
         self._saved_com_port = ""
         self._saved_video_index: Any = None
+        self._invert_lf: dict = {}
 
         root = QVBoxLayout(self)
         root.setSpacing(8)
@@ -558,6 +559,10 @@ class SetupPage(QWidget):
     def _on_show_changed(self) -> None:
         self.localizer_settings_changed.emit()
 
+    def set_invert_lf(self, invert_lf: dict) -> None:
+        """Called by main_window whenever the LF invert-checkbox state changes."""
+        self._invert_lf = dict(invert_lf)
+
     def _on_build_clicked(self) -> None:
         track_id = self.current_track_id()
         if not track_id:
@@ -566,7 +571,7 @@ class SetupPage(QWidget):
             )
             return
         from dct.gui.widgets.reference_build_dialog import ReferenceBuildDialog
-        dlg = ReferenceBuildDialog(track_id, self)
+        dlg = ReferenceBuildDialog(track_id, invert_lf=self._invert_lf, parent=self)
         if dlg.exec():
             self._reload_loc_profiles()
 

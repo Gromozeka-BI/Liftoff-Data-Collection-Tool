@@ -38,6 +38,7 @@ from dct.gui.widgets.video_preview import VideoPreviewWidget
 from dct.localization import OnlineLocalizer
 from dct.localization import reference_builder as refbuild
 from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1
+from dct.session import load_meta
 from dct.video_preview_source import VideoPreviewSource
 from dct.log import get_logger
 
@@ -80,6 +81,7 @@ class MainWindow(QMainWindow):
         self._prev_ts_wall: float | None = None
         self._prev_rc_ts_wall: float | None = None
         self._record_ds_mode: str = "liftoff"
+        self._current_rate_profile: dict | None = None  # rate profile of current session
         self._last_loc: tuple[float, float] | None = None
         self._dual_loc_log_mono: float = 0.0
         self._last_lf_sticks: list[float] | None = None
@@ -93,6 +95,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect_signals()
         self._restore_window_state()
+        self._propagate_invert_to_pages()
 
         QShortcut(QKeySequence("F11"), self, self._toggle_race_mode)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._exit_race_mode)
@@ -181,6 +184,11 @@ class MainWindow(QMainWindow):
         self._setup_page.reset_filter_button().clicked.connect(self._reset_localizer)
 
         self._replay_page.session_selected.connect(self._on_replay_session_selected)
+        self._replay_page.localizer_settings_changed.connect(self._on_replay_loc_settings_changed)
+        self._replay_page.reset_filter_button().clicked.connect(self._reset_localizer)
+
+        # Keep pages in sync with invert checkboxes so dialogs use the right convention
+        self._graphs.invert_changed.connect(self._on_invert_changed)
 
         # Bottom strip — record
         self._bottom.start_clicked.connect(self._on_start_clicked)
@@ -228,7 +236,9 @@ class MainWindow(QMainWindow):
             self._bottom.set_replay_mode()
             self._stop_preview()
             self._replay_page.reload_sessions()
-            self._deactivate_localizer_full()
+            # Keep localizer initialized (reference path visible on map);
+            # it will be re-initialized per session in _on_replay_session_selected.
+            self._teardown_localizer()
 
         self._map.clear_trail()
         self._graphs.clear()
@@ -277,6 +287,19 @@ class MainWindow(QMainWindow):
         if self._mode == MODE_RECORD and self._preview is not None:
             self._start_preview(source_cfg)
 
+    @pyqtSlot(dict)
+    def _on_invert_changed(self, state: dict) -> None:
+        """Propagate LF invert state to pages so reference dialogs use the same convention."""
+        inv_lf = state.get("lf", {})
+        self._setup_page.set_invert_lf(inv_lf)
+        self._replay_page.set_invert_lf(inv_lf)
+
+    def _propagate_invert_to_pages(self) -> None:
+        """Push current invert state to pages (called after set_invert_state bypasses signal)."""
+        inv_lf = self._graphs.get_invert_state().get("lf", {})
+        self._setup_page.set_invert_lf(inv_lf)
+        self._replay_page.set_invert_lf(inv_lf)
+
     # ── localizer ──────────────────────────────────────────────────────────
 
     def _teardown_localizer(self) -> None:
@@ -285,6 +308,7 @@ class MainWindow(QMainWindow):
         self._localizer_legacy = None
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
+        self._current_rate_profile = None
         self._last_loc = None
         self._dual_loc_log_mono = 0.0
         self._last_lf_sticks = None
@@ -338,29 +362,33 @@ class MainWindow(QMainWindow):
             self._prev_ts_wall = None
             self._prev_rc_ts_wall = None
 
+            ds = cfg.get("data_source", "liftoff")
+
             bf_path: Path | None = None
             if p_bf_npz is not None and refbuild.npz_feature_kind(p_bf_npz) == FEATURE_BETAFLIGHT_CLASSIC_V1:
                 bf_path = p_bf_npz
                 self._localizer = OnlineLocalizer.from_file(bf_path)
                 self._localizer.reset()
 
-            if p_leg_npz is not None:
-                if bf_path is None or p_leg_npz.resolve() != bf_path.resolve():
-                    self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz)
+            # Legacy (raw-sticks) localizer only makes sense when driven by LF telemetry.
+            # Skip it for RC-only sessions — nothing would ever call update() on it.
+            if ds != "rc":
+                if p_leg_npz is not None:
+                    if bf_path is None or p_leg_npz.resolve() != bf_path.resolve():
+                        self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz)
+                        self._localizer_legacy.reset()
+                elif p_bf_npz is not None and bf_path is None:
+                    self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz)
                     self._localizer_legacy.reset()
-            elif p_bf_npz is not None and bf_path is None:
-                self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz)
-                self._localizer_legacy.reset()
 
             inv_lf0 = self._graphs.get_invert_state().get("lf", {})
-            if any(inv_lf0.values()):
-                _log.warning(
-                    "Localizer (Liftoff path) will apply GUI Liftoff reverse checkboxes to sticks. "
-                    "Reference .npz is normally built from raw telemetry (no LF reverses); if "
-                    "inverts are on, rebuild the reference with the same convention or turn LF "
-                    "reverses off for recording.",
+            if ds != "rc" and any(inv_lf0.values()):
+                _log.info(
+                    "Localizer: LF invert active %s — sticks are sign-flipped before "
+                    "matching.  Build reference with the same invert settings via the "
+                    "'Build…' dialog so the feature vectors share the same convention.",
+                    {k: v for k, v in inv_lf0.items() if v},
                 )
-            ds = cfg.get("data_source", "liftoff")
             if ds == "both" and self._localizer is not None:
                 self._localizer_rc = OnlineLocalizer.from_file(bf_path)
                 self._localizer_rc.reset()
@@ -368,19 +396,27 @@ class MainWindow(QMainWindow):
                     "RC localizer (Betaflight): same .npz as Liftoff BF — blue dotted trail; "
                     "throttled INFO compares RC vs LF when legacy is off, else see loc_triple.",
                 )
+            elif ds == "rc":
+                # RC-only: _localizer is already the BF localizer, driven by RC sticks.
+                _log.info(
+                    "RC-only localizer (Betaflight): driven by RC sticks → gold trail/arrow.",
+                )
             bundle_bits: list[str] = []
             if self._localizer is not None and bf_path is not None:
-                bundle_bits.append(f"LF Betaflight ← {bf_path.name}")
+                label = "RC Betaflight" if ds == "rc" else "LF Betaflight"
+                bundle_bits.append(f"{label} ← {bf_path.name}")
             if self._localizer_legacy is not None:
                 leg_src = p_leg_npz if p_leg_npz is not None else p_bf_npz
                 bundle_bits.append(f"LF legacy raw ← {leg_src.name if leg_src else '?'}")
             if self._localizer_rc is not None:
                 bundle_bits.append("RC Betaflight ← same BF .npz")
             if bundle_bits:
-                _log.info(
-                    "Localizer bundle (gold=LF BF, blue=RC BF, green dash-dot=LF raw): %s",
-                    " | ".join(bundle_bits),
+                legend = (
+                    "gold=RC BF"
+                    if ds == "rc"
+                    else "gold=LF BF, blue=RC BF, green dash-dot=LF raw"
                 )
+                _log.info("Localizer bundle (%s): %s", legend, " | ".join(bundle_bits))
             if bf_path is not None and p_leg_npz is None:
                 _log.info(
                     "Legacy sidecar missing next to %s — raw-stick PF disabled. "
@@ -426,6 +462,131 @@ class MainWindow(QMainWindow):
         self._map.clear_localizer_overlay()
         self._last_loc = None
         self._map.update_hud(self._latest_frame, None)
+
+    def _reset_localizer_on_seek(self) -> None:
+        """Reset particle filter state and clear map overlays after a replay seek."""
+        self._reset_localizer()
+
+    @staticmethod
+    def _session_track_id(session_path: Path) -> str:
+        """Return the track_id for *session_path*.
+
+        Priority:
+        1. ``track.json`` top-level ``id`` or ``track_id`` field
+        2. ``meta.json`` ``track`` or ``track_id`` field
+        3. Parse the session folder name (``…_track-<id>_session-…``)
+        """
+        track_file = session_path / "track.json"
+        if track_file.exists():
+            try:
+                with open(track_file, encoding="utf-8") as f:
+                    td = json.load(f)
+                tid = str(td.get("id") or td.get("track_id") or "").strip()
+                if tid:
+                    return tid
+            except Exception:
+                pass
+
+        meta_file = session_path / "meta.json"
+        if meta_file.exists():
+            try:
+                with open(meta_file, encoding="utf-8") as f:
+                    m = json.load(f)
+                tid = str(m.get("track") or m.get("track_id") or "").strip()
+                if tid:
+                    return tid
+            except Exception:
+                pass
+
+        # Last resort: parse folder name  e.g. "…_track-track-001_session-002"
+        import re
+        m2 = re.search(r"_track-(.+?)_session-", session_path.name)
+        if m2:
+            return m2.group(1)
+
+        return ""
+
+    def _try_init_localizer_for_replay(self, session_path: Path) -> None:
+        """Initialize (or deactivate) the localizer based on the selected replay session.
+
+        Reads ``track.json`` → ``track_id`` → finds the default reference for
+        that track via ``reference_builder.default_for_track``.  Also reads
+        ``meta.json`` to determine the data-source mode so the RC localizer is
+        set up when needed.
+        """
+        # Respect the enable checkbox on the Replay page
+        if not self._replay_page.localizer_enabled():
+            self._deactivate_localizer_full()
+            return
+
+        track_id = self._session_track_id(session_path)
+        if not track_id:
+            _log.info("Replay localizer: no track_id — localizer disabled for this session.")
+            self._deactivate_localizer_full()
+            return
+
+        # Prefer the profile explicitly selected in the Replay page; fall back to default
+        ref_path = self._replay_page.current_localizer_path()
+        if ref_path is None:
+            ref_path = refbuild.default_for_track(track_id)
+        if ref_path is None:
+            _log.info(
+                "Replay localizer: no reference found for track '%s' — localizer disabled.",
+                track_id,
+            )
+            self._deactivate_localizer_full()
+            return
+
+        # Determine data-source mode from meta.json
+        ds_mode = "liftoff"
+        meta_file = session_path / "meta.json"
+        if meta_file.exists():
+            try:
+                meta = load_meta(session_path)
+                ds_mode = meta.get("data_source", "liftoff")
+            except Exception as exc:
+                _log.warning("Replay localizer: cannot read meta.json: %s", exc)
+
+        # Auto-detect RC-only sessions: no telemetry.parquet but rc_channels.parquet present
+        if ds_mode == "liftoff" and not (session_path / "telemetry.parquet").exists():
+            if (session_path / "rc_channels.parquet").exists():
+                ds_mode = "rc"
+                _log.info(
+                    "Replay localizer: no telemetry.parquet found — auto-detected RC-only session, "
+                    "switching to ds_mode='rc'.",
+                )
+
+        # Build a cfg that mirrors what _init_localizer_from_cfg expects
+        cfg = {
+            "localizer_enabled": True,
+            "localizer_reference_path": str(ref_path),
+            "data_source": ds_mode,
+        }
+        self._init_localizer_from_cfg(cfg)
+        self._record_ds_mode = ds_mode
+
+        # Load the session's own rate profile so update() converts sticks with
+        # the correct rates, making the reference reusable across rate changes.
+        rp_file = session_path / "rate_profile.json"
+        if rp_file.exists():
+            try:
+                import json as _json
+                self._current_rate_profile = _json.loads(rp_file.read_text(encoding="utf-8"))
+                _log.info(
+                    "Replay localizer: rate_profile loaded from session (%s)",
+                    self._current_rate_profile.get("name", "?"),
+                )
+            except Exception as exc:
+                _log.warning("Replay localizer: cannot read rate_profile.json: %s", exc)
+                self._current_rate_profile = None
+        else:
+            self._current_rate_profile = None
+
+        self._on_loc_show_changed()
+        _log.info(
+            "Replay localizer: track='%s' ds='%s' ref='%s'",
+            track_id, ds_mode, ref_path.name,
+        )
 
     def _log_localizer_compare(self, ts_wall: float) -> None:
         """Throttled INFO: dual (LF_BF vs RC_BF) and optional triple (+ legacy raw sticks)."""
@@ -497,10 +658,23 @@ class MainWindow(QMainWindow):
             )
 
     def _on_loc_show_changed(self) -> None:
-        s = self._setup_page.localizer_show_state()
+        if self._mode == MODE_REPLAY:
+            s = self._replay_page.localizer_show_state()
+        else:
+            s = self._setup_page.localizer_show_state()
         self._map.set_reference_path_visible(s["path"])
         self._map.set_localizer_arrow_visible(s["arrow"])
         self._map.set_localizer_trail_visible(s["trail"])
+
+    @pyqtSlot()
+    def _on_replay_loc_settings_changed(self) -> None:
+        """Re-initialize the localizer when the user changes settings in the Replay page."""
+        if self._mode != MODE_REPLAY:
+            return
+        self._on_loc_show_changed()
+        if self._last_replay_path:
+            self._try_init_localizer_for_replay(Path(self._last_replay_path))
+            self._reset_localizer_on_seek()
 
     # ── record session ─────────────────────────────────────────────────────
 
@@ -547,6 +721,17 @@ class MainWindow(QMainWindow):
                 self._current_track = None
         else:
             self._current_track = None
+
+        # Capture the rate profile NOW from cfg so the localizer can convert sticks
+        # to deg/s immediately — rate_profile.json is only written on session STOP,
+        # so reading it in _on_session_started always yields None during recording.
+        rate = cfg.get("rate")
+        self._current_rate_profile = rate if isinstance(rate, dict) and rate else None
+        if self._current_rate_profile:
+            _log.info(
+                "Session rate_profile set for localizer (from cfg): %s",
+                self._current_rate_profile.get("name", "?"),
+            )
 
         self._init_localizer_from_cfg(cfg)
         self._on_loc_show_changed()
@@ -648,6 +833,9 @@ class MainWindow(QMainWindow):
             self._current_track = track_data
         else:
             self._current_track = None
+        # Use the unified helper so meta.json / folder name are also checked
+        replay_track_id = self._session_track_id(p)
+        self._replay_page.set_localizer_track(replay_track_id)
 
         if self._replay is not None:
             try:
@@ -662,6 +850,8 @@ class MainWindow(QMainWindow):
                 self._graphs.set_invert_state(
                     json.loads(invert_path.read_text(encoding="utf-8")),
                 )
+                # set_invert_state blocks checkbox signals, propagate manually
+                self._propagate_invert_to_pages()
             except Exception:
                 pass
 
@@ -690,6 +880,7 @@ class MainWindow(QMainWindow):
         self._replay.telemetry_updated.connect(self._on_telemetry)
         self._replay.telemetry_batch.connect(self._graphs.update_batch)
         self._replay.rc_batch.connect(self._graphs.update_rc_batch)
+        self._replay.rc_batch.connect(self._on_rc_batch_localizer)
         self._replay.event_fired.connect(self._on_event)
         self._replay.stats_updated.connect(self._on_stats)
         self._replay.video_frame.connect(self._on_replay_video_frame)
@@ -700,6 +891,8 @@ class MainWindow(QMainWindow):
         self._graphs.clear()
         self._lap_count = 0
         self._top_bar.set_summary(p.name)
+
+        self._try_init_localizer_for_replay(p)
 
         self._replay.seek(0.0)
 
@@ -716,6 +909,7 @@ class MainWindow(QMainWindow):
             self._replay.seek(fraction)
             self._map.clear_trail()
             self._graphs.clear()
+            self._reset_localizer_on_seek()
 
     @pyqtSlot(float)
     def _on_replay_speed(self, speed: float) -> None:
@@ -744,6 +938,7 @@ class MainWindow(QMainWindow):
         self._replay.seek_to_ts(ts_wall)
         self._map.clear_trail()
         self._graphs.clear()
+        self._reset_localizer_on_seek()
 
     @pyqtSlot(dict)
     def _on_replay_drag_started(self, _ev: dict) -> None:
@@ -758,6 +953,7 @@ class MainWindow(QMainWindow):
             return
         self._replay.update_event(seq, ts_wall=ts_wall)
         self._replay.seek_to_ts(ts_wall)
+        self._reset_localizer_on_seek()
 
     @pyqtSlot(int, str, float, int)
     def _on_replay_inline_apply(self, seq: int, etype: str, ts_wall: float, gate_id: int) -> None:
@@ -787,6 +983,7 @@ class MainWindow(QMainWindow):
         new_ts = float(ts_arr[idx])
         self._replay.update_event(seq, ts_wall=new_ts)
         self._replay.seek_to_ts(new_ts)
+        self._reset_localizer_on_seek()
 
     @pyqtSlot(int)
     def _on_nudge_ms(self, delta_ms: int) -> None:
@@ -799,6 +996,7 @@ class MainWindow(QMainWindow):
         ts = float(sel.get("ts_wall", 0.0)) + delta_ms / 1000.0
         self._replay.update_event(seq, ts_wall=ts)
         self._replay.seek_to_ts(ts)
+        self._reset_localizer_on_seek()
 
     def _on_replay_events_changed(self, events: list) -> None:
         self._bottom.replay_controls().set_events(events)
@@ -814,7 +1012,7 @@ class MainWindow(QMainWindow):
         self._latest_frame = frame
         self._map.update_drone(frame)
         if (
-            self._mode == MODE_RECORD
+            self._mode in (MODE_RECORD, MODE_REPLAY)
             and self._record_ds_mode in ("liftoff", "both")
             and (self._localizer is not None or self._localizer_legacy is not None)
         ):
@@ -831,7 +1029,7 @@ class MainWindow(QMainWindow):
                     self._last_lf_sticks = list(sticks_lf)
 
                 if self._localizer is not None:
-                    res = self._localizer.update(sticks_lf, dt)
+                    res = self._localizer.update(sticks_lf, dt, rate_profile=self._current_rate_profile)
                     self._map.update_localizer_estimate(
                         float(res.position_xyz[0]),
                         float(res.position_xyz[2]),
@@ -877,7 +1075,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(list)
     def _on_rc_batch_localizer(self, frames: list) -> None:
         """Drive PF from RC (RC-only) or second PF from RC in Liftoff+RC (dual compare)."""
-        if self._mode != MODE_RECORD:
+        if self._mode not in (MODE_RECORD, MODE_REPLAY):
             return
         ds = self._record_ds_mode
         if ds not in ("rc", "both"):
@@ -895,13 +1093,26 @@ class MainWindow(QMainWindow):
             self._prev_rc_ts_wall = ts
             try:
                 sticks = rc_frame_to_sticks_norm(frame, inv)
-                res = loc.update(sticks, dt)
+                res = loc.update(sticks, dt, rate_profile=self._current_rate_profile)
                 if ds == "rc":
-                    self._map.update_localizer_estimate(
-                        float(res.position_xyz[0]),
-                        float(res.position_xyz[2]),
-                    )
-                    self._last_loc = (float(res.progress), float(res.uncertainty_m))
+                    x = float(res.position_xyz[0])
+                    z = float(res.position_xyz[2])
+                    prog = float(res.progress)
+                    sigma = float(res.uncertainty_m)
+                    self._map.update_localizer_estimate(x, z)
+                    self._last_loc = (prog, sigma)
+                    self._last_rc_sticks = list(sticks)
+                    # Throttled log (≤1 Hz)
+                    now = time.monotonic()
+                    if now - self._dual_loc_log_mono >= 1.0:
+                        self._dual_loc_log_mono = now
+                        _log.info(
+                            "loc_rc ts=%.3f sticks T,Y,P,R=%s | "
+                            "RC_BF xz=(%.2f,%.2f) prog=%.3f σ=%.2f",
+                            ts,
+                            [round(s, 4) for s in sticks],
+                            x, z, prog, sigma,
+                        )
                 else:
                     self._last_rc_sticks = list(sticks)
                     self._map.update_localizer_rc_estimate(
@@ -943,6 +1154,8 @@ class MainWindow(QMainWindow):
             )
         except Exception:
             pass
+        # rate_profile is already set in _do_start_session from cfg["rate"]
+        # before the session started.  Nothing to do here.
 
     @pyqtSlot(dict)
     def _on_session_stopped(self, result: dict) -> None:
@@ -1067,6 +1280,12 @@ class MainWindow(QMainWindow):
             self._sidebar.set_collapsed(True)
             self._top_bar.set_sidebar_collapsed(True)
 
+        # Restore last active mode (default: Record)
+        saved_mode = s.get("last_mode", "record")
+        if saved_mode == "replay":
+            # Use a short delay so the window is fully shown before switching
+            QTimer.singleShot(0, lambda: self._switch_mode(MODE_REPLAY))
+
     def _save_window_state(self) -> None:
         s = ui_settings.load()
         win = s.setdefault("window", {})
@@ -1089,6 +1308,7 @@ class MainWindow(QMainWindow):
         sb = s.setdefault("sidebar", {})
         sb["collapsed"] = bool(self._sidebar.is_collapsed())
         sb["width"] = int(self._sidebar.width())
+        s["last_mode"] = "replay" if self._mode == MODE_REPLAY else "record"
         ui_settings.save(s)
 
     # ── adaptive layout ────────────────────────────────────────────────────

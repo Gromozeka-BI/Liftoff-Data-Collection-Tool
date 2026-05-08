@@ -1,0 +1,7 @@
+{
+  "id": "RedSheep_200",
+  "name": "RedSheep_200",
+  "motor_kv": 1500,
+  "weight_g": 550,
+  "prop": "Gemfan 5136"
+}

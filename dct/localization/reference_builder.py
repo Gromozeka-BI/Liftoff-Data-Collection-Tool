@@ -33,6 +33,65 @@ _log = logging.getLogger(__name__)
 
 _VALID_PROFILE_NAME = re.compile(r"[A-Za-z0-9_\-]{1,40}")
 
+_LEGACY_STICKS_SUFFIX = "_legacy_sticks"
+
+
+def legacy_sticks_profile_name(profile: str) -> str:
+    """Имя профиля для sidecar-эталона (сырые стики)."""
+    p = (profile or "default").strip() or "default"
+    if p.endswith(_LEGACY_STICKS_SUFFIX):
+        return p
+    return f"{p}{_LEGACY_STICKS_SUFFIX}"
+
+
+def legacy_sticks_npz_path(primary_npz: Path) -> Path:
+    """Sidecar эталона: те же t/pos, наблюдения — сырые стики (legacy PF).
+
+    Имя: ``{stem(primary)}_legacy_sticks.npz`` для ``default.npz`` →
+    ``default_legacy_sticks.npz``. Создаётся при сборке эталона с Betaflight
+    фичами (см. Reference build dialog).
+    """
+    stem = primary_npz.stem
+    if stem.endswith(_LEGACY_STICKS_SUFFIX):
+        return primary_npz
+    return primary_npz.with_name(f"{stem}{_LEGACY_STICKS_SUFFIX}.npz")
+
+
+def npz_feature_kind(path: Path) -> str | None:
+    """Значение ``feature_kind`` из .npz (строка) или ``None`` для старых эталонов."""
+    with np.load(path, allow_pickle=False) as d:
+        if "feature_kind" not in d.files:
+            return None
+        fk = d["feature_kind"]
+        s = fk.item() if fk.ndim == 0 else str(fk.flat[0])
+        if isinstance(s, bytes):
+            s = s.decode("utf-8", errors="replace")
+        s = str(s).strip()
+        return s or None
+
+
+def resolve_bf_and_legacy_npz(selected: Path) -> tuple[Path | None, Path | None]:
+    """Пара путей ``(betaflight_npz, legacy_npz)`` для одного логического профиля.
+
+    В комбо можно выбрать либо ``default.npz``, либо ``default_legacy_sticks.npz`` —
+    оба варианта подключают те же два файла, если они есть на диске.
+    """
+    selected = selected.resolve()
+    stem = selected.stem
+    parent = selected.parent
+    if stem.endswith(_LEGACY_STICKS_SUFFIX):
+        base_stem = stem[: -len(_LEGACY_STICKS_SUFFIX)]
+        p_leg = selected if selected.is_file() else None
+        p_bf = parent / f"{base_stem}.npz"
+        if not p_bf.is_file():
+            p_bf = None
+        return (p_bf, p_leg)
+    p_bf = selected if selected.is_file() else None
+    p_leg = legacy_sticks_npz_path(selected)
+    if not p_leg.is_file():
+        p_leg = None
+    return (p_bf, p_leg)
+
 
 @dataclass
 class ReferenceInfo:

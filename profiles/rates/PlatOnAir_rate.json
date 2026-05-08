@@ -1,0 +1,20 @@
+{
+  "id": "rate_2",
+  "model": "betaflight",
+  "name": "PlatOnAir_rate",
+  "pitch": {
+    "rc_rate": 1.02,
+    "rate": 0.62,
+    "expo": 0.00
+  },
+  "roll": {
+    "rc_rate": 1.04,
+    "rate": 0.69,
+    "expo": 0.00
+  },
+  "yaw": {
+    "rc_rate": 1.02,
+    "rate": 0.62,
+    "expo": 0.00
+  }
+}

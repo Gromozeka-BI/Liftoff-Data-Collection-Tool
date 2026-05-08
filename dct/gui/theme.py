@@ -18,6 +18,9 @@ LOC_TRAIL = "#8B7355"
 # Second localizer (RC sticks) in Liftoff+RC mode — distinct from sim (gold).
 LOCALIZER_RC = "#569CD6"
 LOC_TRAIL_RC = "#3D6FA3"
+# Третий PF (legacy sticks, тот же круг что BF-эталон)
+LOCALIZER_LEGACY = "#B5CEA8"
+LOC_TRAIL_LEGACY = "#6A9955"
 GATE    = "#CE9178"
 GATE_SF = "#4EC9B0"
 

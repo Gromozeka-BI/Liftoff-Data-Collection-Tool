@@ -36,6 +36,8 @@ from dct.gui.widgets.track_map import TrackMapWidget
 from dct.gui.widgets.video_pip import VideoPiP
 from dct.gui.widgets.video_preview import VideoPreviewWidget
 from dct.localization import OnlineLocalizer
+from dct.localization import reference_builder as refbuild
+from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1
 from dct.video_preview_source import VideoPreviewSource
 from dct.log import get_logger
 
@@ -74,6 +76,7 @@ class MainWindow(QMainWindow):
         self._latest_frame: dict | None = None
         self._localizer: OnlineLocalizer | None = None
         self._localizer_rc: OnlineLocalizer | None = None
+        self._localizer_legacy: OnlineLocalizer | None = None
         self._prev_ts_wall: float | None = None
         self._prev_rc_ts_wall: float | None = None
         self._record_ds_mode: str = "liftoff"
@@ -83,6 +86,7 @@ class MainWindow(QMainWindow):
         self._last_rc_sticks: list[float] | None = None
         self._last_lf_loc: tuple[float, float, float, float] | None = None  # x,z,prog,sig
         self._last_rc_loc: tuple[float, float, float, float] | None = None
+        self._last_legacy_loc: tuple[float, float, float, float] | None = None
         self._last_replay_path: str | None = None
         self._race_pip: VideoPiP | None = None
 
@@ -278,6 +282,7 @@ class MainWindow(QMainWindow):
     def _teardown_localizer(self) -> None:
         self._localizer = None
         self._localizer_rc = None
+        self._localizer_legacy = None
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
         self._last_loc = None
@@ -286,6 +291,7 @@ class MainWindow(QMainWindow):
         self._last_rc_sticks = None
         self._last_lf_loc = None
         self._last_rc_loc = None
+        self._last_legacy_loc = None
         self._map.clear_localizer_overlay()
         self._map.update_hud(self._latest_frame, None)
 
@@ -308,14 +314,44 @@ class MainWindow(QMainWindow):
             self._map.clear_reference_path()
             return
         try:
-            data = np.load(p, allow_pickle=False)
-            pos = data["pos"]
+            p_bf_npz, p_leg_npz = refbuild.resolve_bf_and_legacy_npz(p)
+
+            def _load_pos(npz: Path) -> np.ndarray:
+                with np.load(npz, allow_pickle=False) as d:
+                    return d["pos"]
+
+            pos_src: Path | None = None
+            if p_bf_npz is not None and refbuild.npz_feature_kind(p_bf_npz) == FEATURE_BETAFLIGHT_CLASSIC_V1:
+                pos_src = p_bf_npz
+            elif p_leg_npz is not None:
+                pos_src = p_leg_npz
+            elif p_bf_npz is not None:
+                pos_src = p_bf_npz
+            else:
+                raise RuntimeError("Не удалось определить эталон по выбранному файлу")
+            pos = _load_pos(pos_src)
             self._map.set_reference_path(pos[:, 0], pos[:, 2])
-            self._localizer = OnlineLocalizer.from_file(p)
-            self._localizer.reset()
-            self._prev_ts_wall = None
+
+            self._localizer = None
             self._localizer_rc = None
+            self._localizer_legacy = None
+            self._prev_ts_wall = None
             self._prev_rc_ts_wall = None
+
+            bf_path: Path | None = None
+            if p_bf_npz is not None and refbuild.npz_feature_kind(p_bf_npz) == FEATURE_BETAFLIGHT_CLASSIC_V1:
+                bf_path = p_bf_npz
+                self._localizer = OnlineLocalizer.from_file(bf_path)
+                self._localizer.reset()
+
+            if p_leg_npz is not None:
+                if bf_path is None or p_leg_npz.resolve() != bf_path.resolve():
+                    self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz)
+                    self._localizer_legacy.reset()
+            elif p_bf_npz is not None and bf_path is None:
+                self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz)
+                self._localizer_legacy.reset()
+
             inv_lf0 = self._graphs.get_invert_state().get("lf", {})
             if any(inv_lf0.values()):
                 _log.warning(
@@ -325,14 +361,35 @@ class MainWindow(QMainWindow):
                     "reverses off for recording.",
                 )
             ds = cfg.get("data_source", "liftoff")
-            if ds == "both":
-                self._localizer_rc = OnlineLocalizer.from_file(p)
+            if ds == "both" and self._localizer is not None:
+                self._localizer_rc = OnlineLocalizer.from_file(bf_path)
                 self._localizer_rc.reset()
                 _log.info(
-                    "Dual localizer active (Liftoff + RC): two independent filters from %s — "
-                    "gold trail = sim sticks [T,Y,P,R], blue dotted = RC sticks (same .npz). "
-                    "Throttled INFO logs compare inputs and outputs.",
-                    p.name,
+                    "RC localizer (Betaflight): same .npz as Liftoff BF — blue dotted trail; "
+                    "throttled INFO compares RC vs LF when legacy is off, else see loc_triple.",
+                )
+            bundle_bits: list[str] = []
+            if self._localizer is not None and bf_path is not None:
+                bundle_bits.append(f"LF Betaflight ← {bf_path.name}")
+            if self._localizer_legacy is not None:
+                leg_src = p_leg_npz if p_leg_npz is not None else p_bf_npz
+                bundle_bits.append(f"LF legacy raw ← {leg_src.name if leg_src else '?'}")
+            if self._localizer_rc is not None:
+                bundle_bits.append("RC Betaflight ← same BF .npz")
+            if bundle_bits:
+                _log.info(
+                    "Localizer bundle (gold=LF BF, blue=RC BF, green dash-dot=LF raw): %s",
+                    " | ".join(bundle_bits),
+                )
+            if bf_path is not None and p_leg_npz is None:
+                _log.info(
+                    "Legacy sidecar missing next to %s — raw-stick PF disabled. "
+                    "Re-run \"Build && Save\" to emit *_legacy_sticks.npz.",
+                    bf_path.name,
+                )
+            if bf_path is None and self._localizer_legacy is not None:
+                _log.info(
+                    "Only legacy-stick .npz in bundle — RC Betaflight localizer needs the BF file.",
                 )
         except Exception as exc:
             _log.error("Localizer init failed: %s", exc)
@@ -340,15 +397,22 @@ class MainWindow(QMainWindow):
             self._map.clear_reference_path()
             self._localizer = None
             self._localizer_rc = None
+            self._localizer_legacy = None
 
     def _reset_localizer(self) -> None:
-        if self._localizer is None and self._localizer_rc is None:
+        if (
+            self._localizer is None
+            and self._localizer_rc is None
+            and self._localizer_legacy is None
+        ):
             return
         try:
             if self._localizer is not None:
                 self._localizer.reset()
             if self._localizer_rc is not None:
                 self._localizer_rc.reset()
+            if self._localizer_legacy is not None:
+                self._localizer_legacy.reset()
         except Exception:
             pass
         self._prev_ts_wall = None
@@ -358,12 +422,13 @@ class MainWindow(QMainWindow):
         self._last_rc_sticks = None
         self._last_lf_loc = None
         self._last_rc_loc = None
+        self._last_legacy_loc = None
         self._map.clear_localizer_overlay()
         self._last_loc = None
         self._map.update_hud(self._latest_frame, None)
 
-    def _log_dual_localizer_compare(self, ts_rc: float) -> None:
-        """Periodic log: stick deltas and position/progress deltas (Liftoff vs RC paths)."""
+    def _log_localizer_compare(self, ts_wall: float) -> None:
+        """Throttled INFO: dual (LF_BF vs RC_BF) and optional triple (+ legacy raw sticks)."""
         now = time.monotonic()
         if now - self._dual_loc_log_mono < 1.0:
             return
@@ -372,33 +437,64 @@ class MainWindow(QMainWindow):
         rc_s = self._last_rc_sticks
         lf_p = self._last_lf_loc
         rc_p = self._last_rc_loc
-        if lf_s is None or rc_s is None or lf_p is None or rc_p is None:
+        leg_p = self._last_legacy_loc
+
+        if self._record_ds_mode == "both" and lf_s and rc_s and lf_p and rc_p:
+            d = [round(rc_s[i] - lf_s[i], 4) for i in range(4)]
+            dx = rc_p[0] - lf_p[0]
+            dz = rc_p[1] - lf_p[1]
+            dp = rc_p[2] - lf_p[2]
+            dsig = rc_p[3] - lf_p[3]
+            if leg_p is not None:
+                _log.info(
+                    "loc_triple ts=%.3f Δsticks(rc-lf) T,Y,P,R=%s | "
+                    "LF_BF xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                    "RC_BF xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                    "LF_raw xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                    "Δxz RC−LF=(%.3f,%.3f) Δprog RC−LF=%.4f LEG−LF=%.4f RC−LEG=%.4f Δσ=%.3f",
+                    ts_wall,
+                    d,
+                    lf_p[0], lf_p[1], lf_p[2], lf_p[3],
+                    rc_p[0], rc_p[1], rc_p[2], rc_p[3],
+                    leg_p[0], leg_p[1], leg_p[2], leg_p[3],
+                    dx, dz, dp, leg_p[2] - lf_p[2], rc_p[2] - leg_p[2], dsig,
+                )
+            else:
+                _log.info(
+                    "loc_dual ts_rc=%.3f Δsticks(rc-lf) T,Y,P,R=%s | "
+                    "LF out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                    "RC out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                    "Δxz=(%.3f,%.3f) Δprog=%.4f Δσ=%.3f",
+                    ts_wall,
+                    d,
+                    lf_p[0], lf_p[1], lf_p[2], lf_p[3],
+                    rc_p[0], rc_p[1], rc_p[2], rc_p[3],
+                    dx, dz, dp, dsig,
+                )
+            return
+
+        if self._record_ds_mode == "liftoff" and leg_p is not None and lf_p is not None:
+            _log.info(
+                "loc_lf_bf_vs_legacy ts=%.3f LF_BF xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                "LF_raw xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
+                "Δxz=(%.3f,%.3f) Δprog=%.4f Δσ=%.3f",
+                ts_wall,
+                lf_p[0], lf_p[1], lf_p[2], lf_p[3],
+                leg_p[0], leg_p[1], leg_p[2], leg_p[3],
+                leg_p[0] - lf_p[0], leg_p[1] - lf_p[1], leg_p[2] - lf_p[2], leg_p[3] - lf_p[3],
+            )
+            return
+
+        if self._record_ds_mode == "both":
             _log.debug(
-                "loc_dual(wait) ts_rc=%.3f have_lf_sticks=%s have_rc_sticks=%s "
-                "have_lf_pose=%s have_rc_pose=%s",
-                ts_rc,
+                "loc_compare(wait) ts=%.3f lf_st=%s rc_st=%s lf_p=%s rc_p=%s leg=%s",
+                ts_wall,
                 lf_s is not None,
                 rc_s is not None,
                 lf_p is not None,
                 rc_p is not None,
+                leg_p is not None,
             )
-            return
-        d = [round(rc_s[i] - lf_s[i], 4) for i in range(4)]
-        dx = rc_p[0] - lf_p[0]
-        dz = rc_p[1] - lf_p[1]
-        dp = rc_p[2] - lf_p[2]
-        dsig = rc_p[3] - lf_p[3]
-        _log.info(
-            "loc_dual ts_rc=%.3f Δsticks(rc-lf) T,Y,P,R=%s | "
-            "LF out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
-            "RC out: xz=(%.2f,%.2f) prog=%.3f σ=%.2f | "
-            "Δxz=(%.3f,%.3f) Δprog=%.4f Δσ=%.3f",
-            ts_rc,
-            d,
-            lf_p[0], lf_p[1], lf_p[2], lf_p[3],
-            rc_p[0], rc_p[1], rc_p[2], rc_p[3],
-            dx, dz, dp, dsig,
-        )
 
     def _on_loc_show_changed(self) -> None:
         s = self._setup_page.localizer_show_state()
@@ -719,8 +815,8 @@ class MainWindow(QMainWindow):
         self._map.update_drone(frame)
         if (
             self._mode == MODE_RECORD
-            and self._localizer is not None
             and self._record_ds_mode in ("liftoff", "both")
+            and (self._localizer is not None or self._localizer_legacy is not None)
         ):
             ts = float(frame["ts_wall"])
             prev = self._prev_ts_wall
@@ -731,21 +827,49 @@ class MainWindow(QMainWindow):
             try:
                 inv_lf = self._graphs.get_invert_state().get("lf", {})
                 sticks_lf = lf_sticks_with_invert(frame, inv_lf)
-                if self._record_ds_mode == "both":
+                if self._record_ds_mode == "both" or self._localizer_legacy is not None:
                     self._last_lf_sticks = list(sticks_lf)
-                res = self._localizer.update(sticks_lf, dt)
-                self._map.update_localizer_estimate(
-                    float(res.position_xyz[0]),
-                    float(res.position_xyz[2]),
-                )
-                self._last_loc = (float(res.progress), float(res.uncertainty_m))
-                if self._record_ds_mode == "both":
-                    self._last_lf_loc = (
+
+                if self._localizer is not None:
+                    res = self._localizer.update(sticks_lf, dt)
+                    self._map.update_localizer_estimate(
                         float(res.position_xyz[0]),
                         float(res.position_xyz[2]),
-                        float(res.progress),
-                        float(res.uncertainty_m),
                     )
+                    self._last_loc = (float(res.progress), float(res.uncertainty_m))
+                    if self._record_ds_mode == "both" or self._localizer_legacy is not None:
+                        self._last_lf_loc = (
+                            float(res.position_xyz[0]),
+                            float(res.position_xyz[2]),
+                            float(res.progress),
+                            float(res.uncertainty_m),
+                        )
+
+                if self._localizer_legacy is not None:
+                    sticks_raw = [
+                        float(frame.get("in_throttle", 0.0)),
+                        float(frame.get("in_yaw", 0.0)),
+                        float(frame.get("in_pitch", 0.0)),
+                        float(frame.get("in_roll", 0.0)),
+                    ]
+                    res_leg = self._localizer_legacy.update(sticks_raw, dt)
+                    self._map.update_localizer_legacy_estimate(
+                        float(res_leg.position_xyz[0]),
+                        float(res_leg.position_xyz[2]),
+                    )
+                    self._last_legacy_loc = (
+                        float(res_leg.position_xyz[0]),
+                        float(res_leg.position_xyz[2]),
+                        float(res_leg.progress),
+                        float(res_leg.uncertainty_m),
+                    )
+                    if self._localizer is None:
+                        self._last_loc = (
+                            float(res_leg.progress),
+                            float(res_leg.uncertainty_m),
+                        )
+                    if self._record_ds_mode == "liftoff":
+                        self._log_localizer_compare(ts)
             except Exception as exc:
                 _log.warning("Localizer update failed: %s", exc)
         self._map.update_hud(frame, self._last_loc)
@@ -790,7 +914,7 @@ class MainWindow(QMainWindow):
                         float(res.progress),
                         float(res.uncertainty_m),
                     )
-                    self._log_dual_localizer_compare(ts)
+                    self._log_localizer_compare(ts)
             except Exception as exc:
                 _log.warning("Localizer RC update failed: %s", exc)
         self._map.update_hud(self._latest_frame, self._last_loc)

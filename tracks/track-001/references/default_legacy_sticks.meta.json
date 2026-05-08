@@ -1,6 +1,6 @@
 {
   "track_id": "track-001",
-  "profile": "default",
+  "profile": "default_legacy_sticks",
   "built_at": "2026-05-06T15:45:35+00:00",
   "source": "C:\\DroneTracker\\LiftOff\\Part_1\\2026-05-06_pilot-Gromozeka_drone-MadTrainer_track-track-001_session-026",
   "lap_index": 1,
@@ -8,5 +8,5 @@
   "track_length_m": 119.62634525501895,
   "frames": 1265,
   "metrics": {},
-  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
+  "feature_kind": "legacy_sticks"
 }

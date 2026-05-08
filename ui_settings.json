@@ -14,14 +14,14 @@
     }
   },
   "pilot": "RedSeep",
-  "drone": "MadTrainer",
+  "drone": "RedSheep_200",
   "rate": "RedSheep_rate",
-  "camera": "45 deg / 130 FOV",
+  "camera": "HDZero Nano V2",
   "track": "Первая трасса",
   "ds_mode": "rc",
   "com_port": "COM25",
   "video_source_index": 2,
-  "sessions_dir": "C:/DroneTracker/LiftOff/Part_1",
+  "sessions_dir": "C:/DroneTracker/MAD hall/Part_3",
   "replay_dir": "C:/DroneTracker/LiftOff/Part_1",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
@@ -32,11 +32,11 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAD///iA////+P////8AAAQP///6kQAAATf///7IAAAEDgAAAAECAAAAB4D///iAAAAAF/////8AAAQP",
+    "geometry": "AdnQywADAAAAAAAA////+QAABf8AAAM3AAAAAQAAAF8AAAQ4AAADNgAAAAACAAAABgAAAAAAAAAAFwAABf8AAAM3",
     "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
-    "split_content": "AAAA/wAAAAEAAAACAAAC6AAAAfAAAAAAAwEAAAABAA==",
+    "split_content": "AAAA/wAAAAEAAAACAAABaAAAA3oAAAAAAwEAAAABAA==",
     "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAACAA==",
-    "screen_name": "ARZOPA"
+    "screen_name": "\\\\.\\DISPLAY1"
   },
   "sidebar": {
     "collapsed": false,

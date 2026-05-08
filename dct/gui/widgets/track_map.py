@@ -336,6 +336,21 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc2_arrow.setOpacity(0.0)
         self.addItem(self._loc2_arrow)
 
+        # Третий локализатор (legacy sticks / тот же круг)
+        self._loc3_trail_x: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc3_trail_z: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc3_trail_item = self.plot(
+            [], [], pen=pg.mkPen(theme.LOC_TRAIL_LEGACY, width=1.2, style=Qt.PenStyle.DashDotLine),
+        )
+        self._loc3_trail_item.setZValue(5)
+        self._loc3_arrow = pg.ArrowItem(
+            angle=90, tipAngle=30, headLen=11, tailLen=7,
+            tailWidth=3, brush=pg.mkBrush(theme.LOCALIZER_LEGACY), pen=None,
+        )
+        self._loc3_arrow.setZValue(6)
+        self._loc3_arrow.setOpacity(0.0)
+        self.addItem(self._loc3_arrow)
+
         self._has_track = False
 
         self._show_ref_path = True
@@ -388,6 +403,10 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc2_trail_z.clear()
         self._loc2_trail_item.setData([], [])
         self._loc2_arrow.setOpacity(0.0)
+        self._loc3_trail_x.clear()
+        self._loc3_trail_z.clear()
+        self._loc3_trail_item.setData([], [])
+        self._loc3_arrow.setOpacity(0.0)
 
     def update_localizer_estimate(self, px: float, pz: float) -> None:
         """Оценка локализатора по стикам Liftoff (золотой трейл/стрелка)."""
@@ -423,6 +442,23 @@ class TrackMapWidget(pg.PlotWidget):
                 tang_deg = math.degrees(math.atan2(dz, dx))
                 self._loc2_arrow.setStyle(angle=90 - tang_deg)
 
+    def update_localizer_legacy_estimate(self, px: float, pz: float) -> None:
+        """Третья оценка PF: legacy-наблюдения (сырые стики), зелёный dash-dot."""
+        self._loc3_trail_x.append(px)
+        self._loc3_trail_z.append(pz)
+        if self._show_loc_trail:
+            self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
+        else:
+            self._loc3_trail_item.setData([], [])
+        self._loc3_arrow.setPos(px, pz)
+        self._loc3_arrow.setOpacity(1.0 if self._show_loc_arrow else 0.0)
+        if len(self._loc3_trail_x) >= 2:
+            dx = self._loc3_trail_x[-1] - self._loc3_trail_x[-2]
+            dz = self._loc3_trail_z[-1] - self._loc3_trail_z[-2]
+            if dx * dx + dz * dz > 1e-8:
+                tang_deg = math.degrees(math.atan2(dz, dx))
+                self._loc3_arrow.setStyle(angle=90 - tang_deg)
+
     # ── visibility toggles ────────────────────────────────────────────────
 
     def set_reference_path_visible(self, on: bool) -> None:
@@ -434,15 +470,18 @@ class TrackMapWidget(pg.PlotWidget):
         self._show_loc_arrow = bool(on)
         self._loc_arrow.setOpacity(1.0 if (on and len(self._loc_trail_x) > 0) else 0.0)
         self._loc2_arrow.setOpacity(1.0 if (on and len(self._loc2_trail_x) > 0) else 0.0)
+        self._loc3_arrow.setOpacity(1.0 if (on and len(self._loc3_trail_x) > 0) else 0.0)
 
     def set_localizer_trail_visible(self, on: bool) -> None:
         self._show_loc_trail = bool(on)
         if not on:
             self._loc_trail_item.setData([], [])
             self._loc2_trail_item.setData([], [])
+            self._loc3_trail_item.setData([], [])
         else:
             self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
             self._loc2_trail_item.setData(list(self._loc2_trail_x), list(self._loc2_trail_z))
+            self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
 
     # ── HUD ───────────────────────────────────────────────────────────────
 

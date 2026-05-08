@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
 
 from dct.localization import reference_builder as refbuild
 from dct.localization.lap_loader import Lap
+from dct.localization.online_localizer import Reference
+from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1
 
 _log = logging.getLogger(__name__)
 
@@ -303,23 +305,41 @@ class ReferenceBuildDialog(QDialog):
             return
         lap = self._laps[idx]
         smooth_w = int(self._spin_smooth.value())
+        profile = self._le_profile.text().strip() or "default"
         try:
             ref = refbuild.build(lap, smooth_w=smooth_w)
             path = refbuild.save_for_track(
                 ref,
                 track_id=self._track_id,
-                profile=self._le_profile.text().strip() or "default",
+                profile=profile,
                 source=str(Path(self._lbl_path.text()).resolve()),
                 lap_index=int(lap.index),
                 smooth_w=smooth_w,
             )
+            path_legacy: Path | None = None
+            if getattr(ref, "feature_kind", None) == FEATURE_BETAFLIGHT_CLASSIC_V1:
+                ref_l = Reference.build(
+                    t=lap.t.copy(),
+                    sticks=lap.sticks.copy(),
+                    pos=lap.pos.copy(),
+                    smooth_w=smooth_w,
+                )
+                leg_prof = refbuild.legacy_sticks_profile_name(profile)
+                path_legacy = refbuild.save_for_track(
+                    ref_l,
+                    track_id=self._track_id,
+                    profile=leg_prof,
+                    source=str(Path(self._lbl_path.text()).resolve()),
+                    lap_index=int(lap.index),
+                    smooth_w=smooth_w,
+                )
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "Reference builder", f"Не удалось сохранить:\n{exc}")
             return
-        QMessageBox.information(
-            self, "Reference builder",
-            f"Готово:\n{path}",
-        )
+        msg = f"Готово:\n{path}"
+        if path_legacy is not None:
+            msg += f"\n\nLegacy sticks (сырой PF, тот же круг):\n{path_legacy}"
+        QMessageBox.information(self, "Reference builder", msg)
         self.accept()
 
     # ── shutdown / thread cleanup ──────────────────────────────────────────

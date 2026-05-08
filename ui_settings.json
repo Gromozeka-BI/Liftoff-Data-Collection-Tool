@@ -22,7 +22,7 @@
   "com_port": "COM3",
   "video_source_index": 0,
   "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_4",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_4",
+  "replay_dir": "D:/MAD Hall Track_1/Part_1",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
   "race": {
@@ -32,11 +32,11 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAAAAAeA////+AAADv8AAAQPAAAJKgAAAN4AAA4pAAADrQAAAAICAAAAB4AAAAeAAAAAFwAADv8AAAQP",
+    "geometry": "AdnQywADAAAAAAAA////+AAAB38AAAQPAAACfwAAAGYAAAd+AAADNQAAAAACAAAAB4AAAAAAAAAAFwAAB38AAAQP",
     "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
-    "split_content": "AAAA/wAAAAEAAAACAAAC6AAAAfAAAAAAAwEAAAABAA==",
+    "split_content": "AAAA/wAAAAEAAAACAAAD6AAAAnoAAAAAAwEAAAABAA==",
     "split_right": "AAAA/wAAAAEAAAACAAACOgAAAiAAAAAAAwEAAAACAA==",
-    "screen_name": "ARZOPA"
+    "screen_name": "XF273 Z"
   },
   "sidebar": {
     "collapsed": false,

@@ -278,6 +278,11 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object)
     def _on_preview_frame_main(self, frame) -> None:
+        # Discard preview frames that arrive (via the Qt event queue) after we
+        # have already switched away from Record mode — they would compete with
+        # replay video and cause flickering.
+        if self._mode != MODE_RECORD:
+            return
         self._video.update_frame(frame, is_rgb=False)
         if self._race_pip is not None:
             self._race_pip.update_frame(frame, is_rgb=False)
@@ -1190,7 +1195,12 @@ class MainWindow(QMainWindow):
                 )
         self._live = None
         self._deactivate_localizer_full()
-        self._start_preview(self._setup_page.current_video_source())
+        # Only restart the preview when we are still in Record mode.  If the user
+        # switched to Replay before this async callback fired, starting a screen
+        # capture preview here would compete with replay video frames and cause
+        # flickering.
+        if self._mode == MODE_RECORD:
+            self._start_preview(self._setup_page.current_video_source())
 
     @pyqtSlot(object)
     def _on_live_video_frame(self, frame) -> None:

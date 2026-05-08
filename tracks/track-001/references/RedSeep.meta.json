@@ -1,0 +1,12 @@
+{
+  "track_id": "track-001",
+  "profile": "RedSeep",
+  "built_at": "2026-05-08T11:31:43+00:00",
+  "source": "D:\\MAD Hall Track_1\\Part_2\\2026-05-06_pilot-RedSeep_drone-MadTrainer_track-track-001_session-007",
+  "lap_index": 2,
+  "smooth_w": 5,
+  "track_length_m": 470.0423908233638,
+  "frames": 4672,
+  "metrics": {},
+  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
+}

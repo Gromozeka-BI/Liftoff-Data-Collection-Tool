@@ -182,7 +182,10 @@ class ReferenceBuildDialog(QDialog):
 
     def _on_browse(self) -> None:
         if self._rb_single.isChecked():
-            folder = QFileDialog.getExistingDirectory(self, "Папка сессии (содержит telemetry.parquet)")
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                "Папка сессии (telemetry.parquet или rc_channels.parquet + events_edited.parquet)",
+            )
         else:
             folder = QFileDialog.getExistingDirectory(self, "Папка сессий (несколько подпапок)")
         if not folder:
@@ -232,9 +235,12 @@ class ReferenceBuildDialog(QDialog):
     def _refresh_list(self) -> None:
         self._lst.clear()
         for s in self._summary:
+            tag = "[RC]" if s.get("data_source") == "rc" else "[LF]"
+            gates = s.get("gate_count", 0)
+            gate_str = f"  ·  {gates:2d} gates" if gates > 0 else ""
             txt = (
-                f"Lap {s['index']:>3}  ·  {s['duration']:5.2f} s  "
-                f"·  {s['length_m']:6.1f} m  ·  {s['frames']:5} frames"
+                f"Lap {s['index']:>3}  {tag}  ·  {s['duration']:5.2f} s  "
+                f"·  {s['length_m']:6.1f} m  ·  {s['frames']:5} frames{gate_str}"
             )
             if s.get("source"):
                 txt += f"  ·  {s['source']}"

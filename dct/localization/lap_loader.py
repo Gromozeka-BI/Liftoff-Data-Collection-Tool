@@ -39,6 +39,10 @@ class Lap:
     duration: float
     source_session: str = ""
     session_dir: Path | None = None
+    #: "liftoff" for sessions with telemetry.parquet, "rc" for RC-only sessions.
+    data_source: str = "liftoff"
+    #: Number of gate crossings recorded within this lap (RC-only; 0 for LF laps).
+    gate_count: int = 0
 
     def __len__(self) -> int:
         return len(self.t)
@@ -162,6 +166,207 @@ def filter_anomalous_laps(
 
 def _is_dct_session(path: Path) -> bool:
     return (path / "telemetry.parquet").exists()
+
+
+def _is_rc_only_session(path: Path) -> bool:
+    return (
+        not (path / "telemetry.parquet").exists()
+        and (path / "rc_channels.parquet").exists()
+    )
+
+
+# ── RC-only session loader ──────────────────────────────────────────────────
+
+# RC channel mapping to [throttle, yaw, pitch, roll] — matches stick_graphs._RC
+_RC_CH_ORDER = ["ch3", "ch4", "ch2", "ch1"]
+_RC_CENTER = 1500.0
+_RC_HALF = 500.0
+
+_LAP_EVENT_TYPES = {"lap", "rh_lap", "button_lap", "session_stop"}
+
+
+def _rc_pwm_to_norm(df) -> np.ndarray:
+    """Convert PWM columns [ch1..ch4] → (N,4) float32 in -1..1.
+
+    Order: [throttle, yaw, pitch, roll]  (Thr=ch3, Yaw=ch4, Pitch=ch2, Roll=ch1).
+    """
+    out = np.empty((len(df), 4), dtype=np.float32)
+    for i, ch in enumerate(_RC_CH_ORDER):
+        out[:, i] = (df[ch].to_numpy(dtype=float) - _RC_CENTER) / _RC_HALF
+    return out
+
+
+def _build_gate_position_lut(track: dict) -> dict[int, np.ndarray]:
+    """Return {gate_id: np.array([x, y, z])} from track.json."""
+    lut: dict[int, np.ndarray] = {}
+    for g in track.get("gates", []):
+        lut[int(g["id"])] = np.asarray(g["position"], dtype=float)
+    return lut
+
+
+def _interpolate_positions_from_gates(
+    ts: np.ndarray,
+    gate_ts: list[float],
+    gate_pos: list[np.ndarray],
+) -> np.ndarray:
+    """Linearly interpolate 3-D positions for each RC timestamp.
+
+    ``gate_ts`` and ``gate_pos`` are the *sorted* gate-crossing timestamps and
+    their 3-D world-space positions (from track.json).  Samples before the
+    first gate or after the last gate are clamped to the nearest gate.
+    """
+    gate_ts_arr = np.asarray(gate_ts, dtype=float)
+    gate_pos_arr = np.asarray(gate_pos, dtype=float)   # (K, 3)
+
+    pos = np.empty((len(ts), 3), dtype=float)
+    for dim in range(3):
+        pos[:, dim] = np.interp(ts, gate_ts_arr, gate_pos_arr[:, dim])
+    return pos
+
+
+def load_rc_only_session(
+    session_path: str | Path,
+    *,
+    prefer_edited: bool = True,
+    min_lap_duration: float = 3.0,
+) -> tuple[list["Lap"], dict]:
+    """Load an RC-only session (no telemetry.parquet) and return ``(laps, track)``.
+
+    Gate crossing timestamps from ``events_edited.parquet`` (when
+    ``prefer_edited=True`` and the file exists, otherwise ``events.parquet``)
+    are combined with the 3-D gate positions from ``track.json`` to interpolate
+    a plausible drone trajectory for every RC sample.  The resulting
+    :class:`Lap` objects have the same shape as those from
+    :func:`load_dct_session` and can be used directly by the reference builder.
+    """
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("Для загрузки RC-сессий требуется pandas.") from exc
+
+    session_path = Path(session_path)
+
+    rc_path = session_path / "rc_channels.parquet"
+    track_path = session_path / "track.json"
+
+    if not rc_path.exists():
+        raise FileNotFoundError(f"Не найден файл RC: {rc_path}")
+    if not track_path.exists():
+        raise FileNotFoundError(f"Не найден файл трассы: {track_path}")
+
+    # ── load data ────────────────────────────────────────────────────────────
+    rc = pd.read_parquet(rc_path)
+    rc.columns = [str(c).strip().lower() for c in rc.columns]
+
+    events_path = (
+        session_path / "events_edited.parquet"
+        if prefer_edited and (session_path / "events_edited.parquet").exists()
+        else session_path / "events.parquet"
+    )
+    if not events_path.exists():
+        raise FileNotFoundError(
+            f"Не найден файл событий: {events_path}. "
+            "Разметьте круги в Replay перед построением референса."
+        )
+    events = pd.read_parquet(events_path)
+    events.columns = [str(c).strip().lower() for c in events.columns]
+
+    track = _read_track(track_path)
+    gate_lut = _build_gate_position_lut(track)
+
+    # ── lap boundaries ───────────────────────────────────────────────────────
+    lap_evs = (
+        events[events["event_type"].isin(_LAP_EVENT_TYPES)]
+        .sort_values("ts_wall")
+    )
+    # Deduplicate: button_lap + rh_lap fire simultaneously; keep unique timestamps
+    # so we don't create spurious zero-length segments between them.
+    boundaries = np.unique(lap_evs["ts_wall"].to_numpy())
+    if len(boundaries) < 2:
+        raise RuntimeError(
+            f"Недостаточно событий круга в {events_path.name} "
+            f"(найдено {len(boundaries)}). "
+            "Убедитесь, что в events_edited.parquet размечены LAP-события."
+        )
+
+    # ── gate crossing LUT (sorted by time) ───────────────────────────────────
+    gate_evs = (
+        events[events["event_type"] == "button_gate"]
+        .sort_values("ts_wall")
+    )
+
+    # ── build laps ────────────────────────────────────────────────────────────
+    rc_ts = rc["ts_wall"].to_numpy(dtype=float)
+    sticks_all = _rc_pwm_to_norm(rc)
+
+    laps: list[Lap] = []
+    for i in range(len(boundaries) - 1):
+        t_start, t_end = boundaries[i], boundaries[i + 1]
+        mask = (rc_ts >= t_start) & (rc_ts < t_end)
+        if mask.sum() < 2:
+            continue
+        t_seg = rc_ts[mask]
+        sticks_seg = sticks_all[mask]
+        if t_seg[-1] - t_seg[0] < min_lap_duration:
+            continue
+
+        # Gate crossings inside this lap (+1 gate on each side for clamping)
+        gate_in_lap = gate_evs[
+            (gate_evs["ts_wall"] >= t_start - 0.5)
+            & (gate_evs["ts_wall"] <= t_end + 0.5)
+        ]
+
+        lap_duration = float(t_seg[-1] - t_seg[0])
+        # Target arc length so that the average "velocity" in the PF matches
+        # v_init_mps ≈ 10 m/s — keeps the particle filter well-conditioned.
+        target_L = lap_duration * 10.0
+
+        if len(gate_in_lap) >= 2:
+            g_ts = gate_in_lap["ts_wall"].to_numpy(dtype=float)
+            g_pos = np.array(
+                [
+                    gate_lut.get(int(gid), np.zeros(3))
+                    for gid in gate_in_lap["gate_id"].to_numpy()
+                ],
+                dtype=float,
+            )
+            pos_seg = _interpolate_positions_from_gates(t_seg, g_ts, g_pos)
+            # Rescale so that total arc length = target_L.
+            # The interpolated path is piecewise-linear between gate positions
+            # (much shorter than the actual curved flight path).  Scaling
+            # preserves the qualitative shape while matching the velocity prior.
+            raw_L = float(np.sum(np.linalg.norm(np.diff(pos_seg, axis=0), axis=1)))
+            if raw_L > 1e-3:
+                pos_seg = pos_seg * (target_L / raw_L)
+        else:
+            # No gate crossings recorded — fall back to straight-line time proxy
+            _log.warning(
+                "Круг %d: нет событий button_gate, позиция будет линейным прокси.",
+                len(laps) + 1,
+            )
+            t_frac = (t_seg - t_seg[0]) / lap_duration  # 0..1
+            pos_seg = np.column_stack(
+                [t_frac * target_L, np.zeros_like(t_frac), np.zeros_like(t_frac)]
+            )
+
+        laps.append(
+            Lap(
+                index=len(laps) + 1,
+                t=t_seg,
+                sticks=sticks_seg.astype(float),
+                pos=pos_seg,
+                duration=float(t_seg[-1] - t_seg[0]),
+                source_session=session_path.name,
+                session_dir=session_path,
+                data_source="rc",
+                gate_count=int(len(gate_in_lap)),
+            )
+        )
+
+    if not laps:
+        raise RuntimeError("Не удалось выделить ни одного круга из RC-сессии.")
+
+    return laps, track
 
 
 def load_dct_session(
@@ -295,7 +500,7 @@ def load_dct_sessions_dir(
 
 
 def laps_summary(laps: list[Lap]) -> list[dict]:
-    """Compact list of ``{index, duration, length, frames, source}`` for UI."""
+    """Compact list of ``{index, duration, length, frames, source, data_source}`` for UI."""
     out = []
     for lap in laps:
         out.append(
@@ -305,6 +510,8 @@ def laps_summary(laps: list[Lap]) -> list[dict]:
                 "length_m": _lap_track_length(lap),
                 "frames": int(len(lap)),
                 "source": lap.source_session,
+                "data_source": getattr(lap, "data_source", "liftoff"),
+                "gate_count": int(getattr(lap, "gate_count", 0)),
             },
         )
     return out

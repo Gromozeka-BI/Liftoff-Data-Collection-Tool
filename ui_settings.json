@@ -22,7 +22,7 @@
   "com_port": "COM3",
   "video_source_index": 1,
   "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_3",
-  "replay_dir": "D:/MAD Hall Track_1/Part_2",
+  "replay_dir": "D:/MAD Hall Track_1/Part_3",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
   "race": {
@@ -44,7 +44,7 @@
   },
   "localizer": {
     "track-001": {
-      "profile": "Grom_3"
+      "profile": "RedRC_1"
     }
   },
   "replay_localizer_enabled": true,

@@ -17,9 +17,11 @@ import numpy as np
 
 from dct.localization.lap_loader import (
     Lap,
+    _is_rc_only_session,
     laps_summary,
     load_dct_session,
     load_dct_sessions_dir,
+    load_rc_only_session,
 )
 from dct.localization.online_localizer import Reference
 from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1, physical_observation_matrix
@@ -150,11 +152,18 @@ class ReferenceInfo:
 def list_laps(source: str | Path) -> tuple[list[Lap], dict, list[dict]]:
     """Load laps from either a single session folder or a folder of sessions.
 
+    Supports three layouts:
+    * Single Liftoff session (``telemetry.parquet`` present)
+    * RC-only session (``rc_channels.parquet`` present, no telemetry)
+    * Folder of sessions (auto-detects the above per sub-folder)
+
     Returns ``(laps, track_dict, summary)``.
     """
     src = Path(source)
     if (src / "telemetry.parquet").exists():
         laps, track = load_dct_session(src)
+    elif _is_rc_only_session(src):
+        laps, track = load_rc_only_session(src)
     else:
         laps, track = load_dct_sessions_dir(src)
     return laps, track, laps_summary(laps)
@@ -187,7 +196,9 @@ def build(
     ``lap.session_dir`` is set and the file exists. Otherwise falls back to
     legacy stick-based observations.
     """
-    sticks = _apply_invert_lf(lap.sticks, invert_lf)
+    # invert_lf corrects Liftoff's Roll sign-flip; RC sticks need no correction.
+    effective_invert = invert_lf if getattr(lap, "data_source", "liftoff") == "liftoff" else None
+    sticks = _apply_invert_lf(lap.sticks, effective_invert)
 
     prof = rate_profile
     if prof is None and lap.session_dir is not None:

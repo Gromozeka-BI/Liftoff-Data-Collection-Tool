@@ -1,0 +1,12 @@
+{
+  "track_id": "track-002",
+  "profile": "Grom1_1",
+  "built_at": "2026-05-08T14:17:00+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_4\\2026-05-08_pilot-Gromozeka_drone-MadTrainer_track-track-002_session-006",
+  "lap_index": 3,
+  "smooth_w": 5,
+  "track_length_m": 315.6229566757004,
+  "frames": 2469,
+  "metrics": {},
+  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
+}

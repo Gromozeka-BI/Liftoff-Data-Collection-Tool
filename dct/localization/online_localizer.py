@@ -252,6 +252,7 @@ class ParticleFilter:
         roughening_s: float = 0.2,
         random_inject_frac: float = 0.02,
         seed: int = 42,
+        channel_weights: list[float] | np.ndarray | None = None,
     ):
         self.ref = ref
         self.N = n_particles
@@ -259,7 +260,21 @@ class ParticleFilter:
         self.v_init_std = v_init_std
         self.v_min = v_min
         self.v_max = v_max
-        self.obs_sigma2_eff = obs_sigma ** 2 * ref.sticks_norm.shape[1]
+        n_ch = ref.sticks_norm.shape[1]
+        if channel_weights is not None:
+            self._ch_w = np.asarray(channel_weights, dtype=np.float64)
+            if self._ch_w.shape != (n_ch,):
+                raise ValueError(
+                    f"channel_weights must have length {n_ch}, got {self._ch_w.shape}"
+                )
+            # Scale obs_sigma2_eff by the number of active (non-zero) channels so
+            # that the likelihood bandwidth stays consistent regardless of how many
+            # channels are used.
+            n_active = float(np.count_nonzero(self._ch_w))
+            self.obs_sigma2_eff = obs_sigma ** 2 * max(n_active, 1.0)
+        else:
+            self._ch_w = None
+            self.obs_sigma2_eff = obs_sigma ** 2 * n_ch
         self.q_s = process_noise_s
         self.q_v = process_noise_v
         self.ess_thr = ess_threshold
@@ -309,7 +324,10 @@ class ParticleFilter:
         # --- обновление весов по наблюдению ---
         idx = np.searchsorted(self.ref.s, self._s).clip(0, len(self.ref.s) - 1)
         feats = self.ref.sticks_norm[idx]
-        d2 = np.sum((feats - stick_norm[None, :]) ** 2, axis=1)
+        diff2 = (feats - stick_norm[None, :]) ** 2
+        if self._ch_w is not None:
+            diff2 = diff2 * self._ch_w[None, :]
+        d2 = np.sum(diff2, axis=1)
         log_w = np.log(self._w + 1e-30) - 0.5 * d2 / self.obs_sigma2_eff
         log_w -= log_w.max()
         self._w = np.exp(log_w)
@@ -381,8 +399,19 @@ class OnlineLocalizer:
     # ------------------------------------------------------------------
     @classmethod
     def from_file(cls, path: str | Path, **pf_kwargs) -> "OnlineLocalizer":
-        """Создать локализатор из сохранённого .npz-файла эталона."""
+        """Создать локализатор из сохранённого .npz-файла эталона.
+
+        Convenience: pass ``use_throttle=False`` to zero-out the throttle
+        channel (index 0) in the distance metric.  Useful when testing
+        cross-drone generalization where throttle levels differ between drones.
+        """
+        use_throttle: bool = pf_kwargs.pop("use_throttle", True)
         ref = Reference.load(path)
+        if not use_throttle:
+            n_ch = ref.sticks_norm.shape[1]
+            weights = np.ones(n_ch, dtype=np.float64)
+            weights[0] = 0.0  # disable throttle channel
+            pf_kwargs.setdefault("channel_weights", weights)
         return cls(ref, **pf_kwargs)
 
     # ------------------------------------------------------------------

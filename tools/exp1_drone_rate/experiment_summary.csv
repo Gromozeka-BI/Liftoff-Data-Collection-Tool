@@ -1,0 +1,9 @@
+flight_id,drone,rate,mode,n_laps,median_err_m,p90_err_m,jump_rate
+1,MadTrainer,Gromozeka_rate,LF+Rate,3,1.464,13.416,0.083
+1,MadTrainer,Gromozeka_rate,RC+Rate,3,1.462,12.665,0.075
+2,MadTrainer,RedSheep_rate,LF+Rate,3,2.65,24.403,0.108
+2,MadTrainer,RedSheep_rate,RC+Rate,3,2.335,15.034,0.096
+3,LiftOff_200,Gromozeka_rate,LF+Rate,3,1.881,38.336,0.181
+3,LiftOff_200,Gromozeka_rate,RC+Rate,3,1.849,35.234,0.18
+4,LiftOff_200,RedSheep_rate,LF+Rate,3,1.884,23.242,0.125
+4,LiftOff_200,RedSheep_rate,RC+Rate,3,1.614,18.864,0.1

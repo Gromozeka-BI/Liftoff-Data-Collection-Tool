@@ -1,0 +1,55 @@
+========================================================================
+One-Way ANOVA: Channel Weight Preset
+  Factor levels: 10 presets
+  Laps per cell: 3  |  Jump threshold: 15.0 m
+========================================================================
+
+Condition: same_drone  |  Mode: LF+Rate  |  sigma=1.0
+--------------------------------------------------------
+  p90 Error (m)           F=   0.78  p=0.6314  n.s.   eta2=0.124  best=angular_scaled  worst=Thr+R
+  Median Error (m)        F=   3.91  p=0.0008  ***    eta2=0.413  best=soft_thr  worst=Thr+R
+  Jump Rate               F=   1.80  p=0.0911  n.s.   eta2=0.245  best=soft_thr  worst=Thr+R
+
+Condition: same_drone  |  Mode: LF+Rate  |  sigma=1.5
+--------------------------------------------------------
+  p90 Error (m)           F=   2.47  p=0.0206  *      eta2=0.308  best=soft_thr  worst=Thr+R
+  Median Error (m)        F=   4.73  p=0.0001  ***    eta2=0.460  best=soft_thr  worst=Thr+R
+  Jump Rate               F=   3.37  p=0.0027  **     eta2=0.378  best=soft_thr  worst=Thr+R
+
+Condition: same_drone  |  Mode: RC+Rate  |  sigma=1.0
+--------------------------------------------------------
+  p90 Error (m)           F=   1.88  p=0.0767  n.s.   eta2=0.253  best=soft_thr  worst=Thr+R
+  Median Error (m)        F=   2.90  p=0.0077  **     eta2=0.343  best=soft_thr  worst=Thr+R
+  Jump Rate               F=   2.34  p=0.0272  *      eta2=0.297  best=soft_thr  worst=Thr+R
+
+Condition: same_drone  |  Mode: RC+Rate  |  sigma=1.5
+--------------------------------------------------------
+  p90 Error (m)           F=   3.01  p=0.0061  **     eta2=0.351  best=Thr+R+Y  worst=Thr+R
+  Median Error (m)        F=   2.80  p=0.0097  **     eta2=0.335  best=Thr+R+Y  worst=Thr+R
+  Jump Rate               F=   2.53  p=0.0178  *      eta2=0.313  best=Thr+R+Y  worst=Thr+R
+
+Condition: cross_drone  |  Mode: LF+Rate  |  sigma=1.0
+--------------------------------------------------------
+  p90 Error (m)           F=   5.47  p=0.0000  ***    eta2=0.496  best=angular_scaled  worst=Thr+R
+  Median Error (m)        F=   6.67  p=0.0000  ***    eta2=0.545  best=soft_thr  worst=Thr+R
+  Jump Rate               F=   8.87  p=0.0000  ***    eta2=0.615  best=angular_scaled  worst=Thr+R
+
+Condition: cross_drone  |  Mode: LF+Rate  |  sigma=1.5
+--------------------------------------------------------
+  p90 Error (m)           F=   6.20  p=0.0000  ***    eta2=0.528  best=angular_scaled  worst=Thr+R
+  Median Error (m)        F=   3.73  p=0.0012  **     eta2=0.402  best=soft_thr  worst=Thr+R
+  Jump Rate               F=  12.05  p=0.0000  ***    eta2=0.684  best=angular_scaled  worst=Thr+R
+
+Condition: cross_drone  |  Mode: RC+Rate  |  sigma=1.0
+--------------------------------------------------------
+  p90 Error (m)           F=   5.53  p=0.0000  ***    eta2=0.499  best=soft_thr  worst=Thr+R
+  Median Error (m)        F=   9.15  p=0.0000  ***    eta2=0.622  best=soft_thr  worst=Thr+R
+  Jump Rate               F=  10.40  p=0.0000  ***    eta2=0.652  best=angular_scaled  worst=Thr+R
+
+Condition: cross_drone  |  Mode: RC+Rate  |  sigma=1.5
+--------------------------------------------------------
+  p90 Error (m)           F=   7.68  p=0.0000  ***    eta2=0.580  best=angular_scaled  worst=Thr+R
+  Median Error (m)        F=   2.63  p=0.0143  *      eta2=0.321  best=soft_thr  worst=Thr+R
+  Jump Rate               F=  11.54  p=0.0000  ***    eta2=0.675  best=angular_scaled  worst=Thr+R
+
+Significance: * p<0.05  ** p<0.01  *** p<0.001  n.s. not significant

@@ -1,0 +1,43 @@
+========================================================================
+Two-Way ANOVA: Drone x Rate
+  Threshold for 'jump': 15.0 m
+  Laps per cell (replications): 3
+========================================================================
+
+Mode: LF+Rate
+--------------------------------------------------------
+
+  Metric: Median Error (m)  (median_err_m)
+    C(drone)                        F=   0.164  p=0.6963      η²=0.014
+    C(rate)                         F=   1.899  p=0.2055      η²=0.159
+    C(drone):C(rate)                F=   1.882  p=0.2074      η²=0.158
+
+  Metric: p90 Error (m)  (p90_err_m)
+    C(drone)                        F=   2.286  p=0.1690      η²=0.174
+    C(rate)                         F=   0.068  p=0.8004      η²=0.005
+    C(drone):C(rate)                F=   2.755  p=0.1356      η²=0.210
+
+  Metric: Jump Rate  (jump_rate)
+    C(drone)                        F=   3.296  p=0.1070      η²=0.249
+    C(rate)                         F=   0.256  p=0.6263      η²=0.019
+    C(drone):C(rate)                F=   1.663  p=0.2332      η²=0.126
+
+Mode: RC+Rate
+--------------------------------------------------------
+
+  Metric: Median Error (m)  (median_err_m)
+    C(drone)                        F=   0.517  p=0.4926      η²=0.032
+    C(rate)                         F=   1.888  p=0.2067      η²=0.117
+    C(drone):C(rate)                F=   5.711  p=0.0439*     η²=0.354
+
+  Metric: p90 Error (m)  (p90_err_m)
+    C(drone)                        F=  12.272  p=0.0080**    η²=0.410
+    C(rate)                         F=   3.452  p=0.1002      η²=0.115
+    C(drone):C(rate)                F=   6.184  p=0.0377*     η²=0.207
+
+  Metric: Jump Rate  (jump_rate)
+    C(drone)                        F=   3.292  p=0.1072      η²=0.219
+    C(rate)                         F=   0.944  p=0.3597      η²=0.063
+    C(drone):C(rate)                F=   2.774  p=0.1344      η²=0.185
+
+Significance: * p<0.05  ** p<0.01  *** p<0.001

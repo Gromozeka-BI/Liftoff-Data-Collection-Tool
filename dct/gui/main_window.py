@@ -368,11 +368,16 @@ class MainWindow(QMainWindow):
             self._prev_rc_ts_wall = None
 
             ds = cfg.get("data_source", "liftoff")
+            obs_sigma: float = float(cfg.get("obs_sigma", 1.5))
+            channel_weights: list[float] | None = cfg.get("channel_weights", None)
+            _pf_extra: dict = {"obs_sigma": obs_sigma}
+            if channel_weights is not None:
+                _pf_extra["channel_weights"] = np.asarray(channel_weights, dtype=float)
 
             bf_path: Path | None = None
             if p_bf_npz is not None and refbuild.npz_feature_kind(p_bf_npz) == FEATURE_BETAFLIGHT_CLASSIC_V1:
                 bf_path = p_bf_npz
-                self._localizer = OnlineLocalizer.from_file(bf_path)
+                self._localizer = OnlineLocalizer.from_file(bf_path, **_pf_extra)
                 self._localizer.reset()
 
             # Legacy (raw-sticks) localizer only makes sense when driven by LF telemetry.
@@ -380,10 +385,10 @@ class MainWindow(QMainWindow):
             if ds != "rc":
                 if p_leg_npz is not None:
                     if bf_path is None or p_leg_npz.resolve() != bf_path.resolve():
-                        self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz)
+                        self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz, **_pf_extra)
                         self._localizer_legacy.reset()
                 elif p_bf_npz is not None and bf_path is None:
-                    self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz)
+                    self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz, **_pf_extra)
                     self._localizer_legacy.reset()
 
             inv_lf0 = self._graphs.get_invert_state().get("lf", {})
@@ -395,7 +400,7 @@ class MainWindow(QMainWindow):
                     {k: v for k, v in inv_lf0.items() if v},
                 )
             if ds == "both" and self._localizer is not None:
-                self._localizer_rc = OnlineLocalizer.from_file(bf_path)
+                self._localizer_rc = OnlineLocalizer.from_file(bf_path, **_pf_extra)
                 self._localizer_rc.reset()
                 _log.info(
                     "RC localizer (Betaflight): same .npz as Liftoff BF — blue dotted trail; "
@@ -406,6 +411,11 @@ class MainWindow(QMainWindow):
                 _log.info(
                     "RC-only localizer (Betaflight): driven by RC sticks → gold trail/arrow.",
                 )
+            _log.info(
+                "Localizer obs_sigma=%.1f  channel_weights=%s",
+                obs_sigma,
+                channel_weights if channel_weights is not None else "[1,1,1,1]",
+            )
             bundle_bits: list[str] = []
             if self._localizer is not None and bf_path is not None:
                 label = "RC Betaflight" if ds == "rc" else "LF Betaflight"
@@ -566,6 +576,8 @@ class MainWindow(QMainWindow):
             "localizer_enabled": True,
             "localizer_reference_path": str(ref_path),
             "data_source": ds_mode,
+            "obs_sigma": self._replay_page.current_obs_sigma(),
+            "channel_weights": self._replay_page.channel_weights(),
         }
         self._init_localizer_from_cfg(cfg)
         self._record_ds_mode = ds_mode

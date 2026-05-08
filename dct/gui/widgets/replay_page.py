@@ -5,8 +5,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGroupBox,
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from dct.gui import ui_settings
@@ -118,6 +118,87 @@ class ReplayPage(QWidget):
         action_row.addWidget(self._btn_loc_reset)
         action_row.addStretch()
         loc_lay.addLayout(action_row)
+
+        sigma_row = QHBoxLayout()
+        sigma_row.setSpacing(4)
+        sigma_lbl = QLabel("Obs σ:")
+        sigma_lbl.setToolTip(
+            "Observation noise sigma for the Particle Filter.\n"
+            "Lower = tighter matching (faster lock, more sensitive to mismatch).\n"
+            "Higher = looser (more robust, but slower/weaker convergence).\n"
+            "Recommended: 1.0–1.5 for same-pilot reference; 2.0+ for cross-pilot."
+        )
+        sigma_row.addWidget(sigma_lbl)
+        self._spn_obs_sigma = QDoubleSpinBox()
+        self._spn_obs_sigma.setRange(0.5, 10.0)
+        self._spn_obs_sigma.setSingleStep(0.5)
+        self._spn_obs_sigma.setDecimals(1)
+        saved_sigma = float(ui_settings.load().get("localizer_obs_sigma", 1.5))
+        self._spn_obs_sigma.setValue(saved_sigma)
+        self._spn_obs_sigma.setToolTip(sigma_lbl.toolTip())
+        self._spn_obs_sigma.valueChanged.connect(self._on_obs_sigma_changed)
+        sigma_row.addWidget(self._spn_obs_sigma)
+        sigma_row.addStretch()
+        loc_lay.addLayout(sigma_row)
+
+        # ── Per-channel weights ──────────────────────────────────────────
+        _CH_DEFAULTS = [1.0, 1.0, 1.0, 1.0]
+        _CH_LABELS    = ["Thr", "Yaw", "Pit", "Roll"]
+        _saved_ws: list = ui_settings.load().get("localizer_ch_weights", _CH_DEFAULTS)
+        if len(_saved_ws) != 4:
+            _saved_ws = _CH_DEFAULTS
+
+        _W_TOOLTIP = (
+            "Per-channel importance weights for the Particle Filter distance:\n"
+            "  Thr  – throttle stick (drone-dependent; set 0 for cross-drone)\n"
+            "  Yaw  – yaw rate (deg/s after rate curve)\n"
+            "  Pit  – pitch rate\n"
+            "  Roll – roll rate (most lap-consistent; raise for better lock)\n"
+            "Weights are applied as: d² = Σ wᵢ·(ref_i − obs_i)²\n"
+            "Then normalised by the number of active channels."
+        )
+        weights_header = QLabel("Weights:")
+        weights_header.setToolTip(_W_TOOLTIP)
+        loc_lay.addWidget(weights_header)
+
+        weights_grid = QHBoxLayout()
+        weights_grid.setSpacing(4)
+        self._spn_ch_weights: list[QDoubleSpinBox] = []
+
+        # Two columns: label | spinbox | label | spinbox
+        col_a = QVBoxLayout()
+        col_a.setSpacing(2)
+        col_b = QVBoxLayout()
+        col_b.setSpacing(2)
+
+        for i, (lbl, val) in enumerate(zip(_CH_LABELS, _saved_ws)):
+            row = QHBoxLayout()
+            row.setSpacing(3)
+            ch_lbl = QLabel(f"{lbl}:")
+            ch_lbl.setFixedWidth(28)
+            ch_lbl.setToolTip(_W_TOOLTIP)
+            row.addWidget(ch_lbl)
+            spn = QDoubleSpinBox()
+            spn.setRange(0.0, 5.0)
+            spn.setSingleStep(0.5)
+            spn.setDecimals(1)
+            spn.setValue(float(val))
+            spn.setFixedWidth(52)
+            spn.setToolTip(_W_TOOLTIP)
+            spn.valueChanged.connect(self._on_ch_weights_changed)
+            row.addWidget(spn)
+            row.addStretch()
+            self._spn_ch_weights.append(spn)
+            if i < 2:
+                col_a.addLayout(row)
+            else:
+                col_b.addLayout(row)
+
+        weights_grid.addLayout(col_a)
+        weights_grid.addLayout(col_b)
+        weights_grid.addStretch()
+        loc_lay.addLayout(weights_grid)
+
         root.addWidget(loc_box)
 
         # ── Hotkey hints ─────────────────────────────────────────────────
@@ -183,6 +264,14 @@ class ReplayPage(QWidget):
     def localizer_enabled(self) -> bool:
         return self._chk_localizer.isChecked()
 
+    def current_obs_sigma(self) -> float:
+        """Return the currently selected obs_sigma for the Particle Filter."""
+        return float(self._spn_obs_sigma.value())
+
+    def channel_weights(self) -> list[float]:
+        """Return current per-channel weights [Thr, Yaw, Pit, Roll]."""
+        return [float(spn.value()) for spn in self._spn_ch_weights]
+
     def current_localizer_path(self) -> Path | None:
         """Return the selected profile .npz path, or None if nothing selected."""
         info = self._combo_loc_profile.currentData()
@@ -239,6 +328,14 @@ class ReplayPage(QWidget):
             # Reload profiles and notify the main window to reinitialize
             self.set_localizer_track(self._current_track_id)
             self.localizer_settings_changed.emit()
+
+    def _on_obs_sigma_changed(self, value: float) -> None:
+        ui_settings.update("localizer_obs_sigma", value)
+        self.localizer_settings_changed.emit()
+
+    def _on_ch_weights_changed(self) -> None:
+        ui_settings.update("localizer_ch_weights", self.channel_weights())
+        self.localizer_settings_changed.emit()
 
     def _on_loc_state_changed(self) -> None:
         ui_settings.update("replay_localizer_enabled", self._chk_localizer.isChecked())

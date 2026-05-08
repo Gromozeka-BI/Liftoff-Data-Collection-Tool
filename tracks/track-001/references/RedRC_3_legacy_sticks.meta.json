@@ -1,0 +1,12 @@
+{
+  "track_id": "track-001",
+  "profile": "RedRC_3_legacy_sticks",
+  "built_at": "2026-05-08T13:08:26+00:00",
+  "source": "D:\\MAD Hall Track_1\\Part_2\\2026-05-06_pilot-RedSeep_drone-MadTrainer_track-track-001_session-007",
+  "lap_index": 1,
+  "smooth_w": 9,
+  "track_length_m": 92.65070915222165,
+  "frames": 924,
+  "metrics": {},
+  "feature_kind": "legacy_sticks"
+}

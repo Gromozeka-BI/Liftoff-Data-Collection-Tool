@@ -1,0 +1,7 @@
+{
+  "id": "LiftOff_200",
+  "name": "LiftOff_200",
+  "motor_kv": 2200,
+  "weight_g": 480,
+  "prop": "Gemfan 51466"
+}

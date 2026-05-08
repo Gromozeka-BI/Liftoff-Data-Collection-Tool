@@ -1,0 +1,11 @@
+preset,p90_err_m,median_err_m,jump_rate
+angular_scaled,23.53,2.3,0.11
+soft_thr,26.17,1.79,0.11
+no_thr,34.61,2.52,0.14
+Y+P+2R,40.05,2.72,0.17
+R+Y_only,45.59,2.57,0.17
+baseline,52.37,4.16,0.2
+P+R_only,53.37,4.99,0.23
+Thr+R+Y,60.15,5.02,0.24
+Thr+P+R,68.9,8.79,0.3
+Thr+R,97.27,28.6,0.5

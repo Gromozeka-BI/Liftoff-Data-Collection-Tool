@@ -32,11 +32,11 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAAAAAAAAAAEMAAAB38AAAhHAAABmwAABWkAAAaaAAAIOAAAAAECAAAAB4AAAAAAAAAETwAAB38AAAhH",
+    "geometry": "AdnQywADAAAAAAE9AAAAjQAABjwAAAN7AAABPQAAAKwAAAY8AAADewAAAAAAAAAAB4AAAAE9AAAArAAABjwAAAN7",
     "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
     "split_content": "AAAA/wAAAAEAAAACAAAB4AAAAWgAAAAAAwEAAAABAA==",
     "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAACAA==",
-    "screen_name": "ARZOPA"
+    "screen_name": "XF273 Z"
   },
   "sidebar": {
     "collapsed": false,
@@ -54,7 +54,7 @@
     }
   },
   "replay_localizer_enabled": true,
-  "last_mode": "record",
+  "last_mode": "replay",
   "localizer_obs_sigma": 2.0,
   "localizer_use_throttle": true,
   "localizer_ch_weights": [

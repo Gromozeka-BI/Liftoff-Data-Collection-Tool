@@ -334,22 +334,74 @@ class ParticleFilter:
         self._w /= self._w.sum() + 1e-12
 
         # --- ресемплинг при вырождении ---
-        ess = 1.0 / (np.sum(self._w ** 2) + 1e-12)
-        if ess < self.ess_thr * self.N:
-            positions = (self.rng.uniform(0, 1) + np.arange(self.N)) / self.N
-            cumw = np.cumsum(self._w)
-            cumw[-1] = 1.0
-            idx_r = np.clip(np.searchsorted(cumw, positions), 0, self.N - 1)
-            self._s = self._s[idx_r] + self.rng.normal(0, self.roughening_s, self.N)
-            self._s = np.mod(self._s, self.ref.L)
-            self._v = self._v[idx_r]
-            if self.random_inject_frac > 0:
-                n_inj = max(1, int(self.N * self.random_inject_frac))
-                inj = self.rng.choice(self.N, n_inj, replace=False)
-                self._s[inj] = self.rng.uniform(0, self.ref.L, n_inj)
-            self._w = np.ones(self.N) / self.N
+        self._resample_if_needed(inject_random=True)
 
         # --- оценка позиции (circular mean) ---
+        return self._estimate()
+
+    # ------------------------------------------------------------------
+    def inject_position_observation(
+        self,
+        xyz_obs: np.ndarray | tuple[float, float, float] | list[float],
+        sigma_cam: float,
+    ) -> tuple[float, float]:
+        """Bayes-update веса частиц по абсолютному XYZ-наблюдению (камера).
+
+        Каждая частица сравнивается с наблюдением через её 3D-точку на референсе:
+        likelihood = exp(-0.5 * ||xyz_part(s_i) − xyz_obs||² / sigma_cam²).
+
+        Это «честный» 3D-апдейт: σ_cam напрямую в метрах, без проекции на 1D-дугу.
+        Метод ортогонален стиковым обновлениям ``update()`` — их можно вызывать
+        в любом порядке (Bayes-веса просто перемножатся).
+
+        Parameters
+        ----------
+        xyz_obs   : (3,) наблюдаемая позиция в системе координат трассы, м
+        sigma_cam : СКО точности камеры, м (изотропный гауссов 3D-шум)
+
+        Returns
+        -------
+        s_est, sigma : такие же, как у ``update()``.
+        """
+        if self._s is None:
+            self.reset()
+        xyz_obs = np.asarray(xyz_obs, dtype=float).reshape(3)
+        if sigma_cam <= 0:
+            raise ValueError(f"sigma_cam must be > 0, got {sigma_cam}")
+
+        # 3D-позиции частиц через индекс ближайшего узла референса по s
+        idx = np.searchsorted(self.ref.s, self._s).clip(0, len(self.ref.s) - 1)
+        xyz_part = self.ref.pos[idx]                       # (N, 3)
+        d2 = np.sum((xyz_part - xyz_obs[None, :]) ** 2, axis=1)
+
+        log_w = np.log(self._w + 1e-30) - 0.5 * d2 / (sigma_cam ** 2)
+        log_w -= log_w.max()
+        self._w = np.exp(log_w)
+        self._w /= self._w.sum() + 1e-12
+
+        self._resample_if_needed(inject_random=False)
+        return self._estimate()
+
+    # ------------------------------------------------------------------
+    def _resample_if_needed(self, *, inject_random: bool) -> None:
+        ess = 1.0 / (np.sum(self._w ** 2) + 1e-12)
+        if ess >= self.ess_thr * self.N:
+            return
+        positions = (self.rng.uniform(0, 1) + np.arange(self.N)) / self.N
+        cumw = np.cumsum(self._w)
+        cumw[-1] = 1.0
+        idx_r = np.clip(np.searchsorted(cumw, positions), 0, self.N - 1)
+        self._s = self._s[idx_r] + self.rng.normal(0, self.roughening_s, self.N)
+        self._s = np.mod(self._s, self.ref.L)
+        self._v = self._v[idx_r]
+        if inject_random and self.random_inject_frac > 0:
+            n_inj = max(1, int(self.N * self.random_inject_frac))
+            inj = self.rng.choice(self.N, n_inj, replace=False)
+            self._s[inj] = self.rng.uniform(0, self.ref.L, n_inj)
+        self._w = np.ones(self.N) / self.N
+
+    # ------------------------------------------------------------------
+    def _estimate(self) -> tuple[float, float]:
         theta = 2 * np.pi * self._s / self.ref.L
         cx = float(np.sum(self._w * np.cos(theta)))
         cy = float(np.sum(self._w * np.sin(theta)))
@@ -357,7 +409,6 @@ class ParticleFilter:
         if ang < 0:
             ang += 2 * np.pi
         s_est = float(ang * self.ref.L / (2 * np.pi))
-
         R = np.sqrt(cx ** 2 + cy ** 2)
         sigma = float(np.sqrt(max(1e-6, 1.0 - R)) * self.ref.L / (2 * np.pi))
         return s_est, sigma
@@ -481,6 +532,43 @@ class OnlineLocalizer:
         s_est, sigma = self._pf.update(stick_norm, dt)
         xyz = self.ref.pos_at_s(s_est)
 
+        return LocalizerResult(
+            position_xyz=xyz,
+            s=s_est,
+            progress=s_est / self.ref.L,
+            uncertainty_m=sigma,
+            track_length=self.ref.L,
+        )
+
+    # ------------------------------------------------------------------
+    def inject_position_observation(
+        self,
+        xyz_obs: np.ndarray | tuple[float, float, float] | list[float],
+        sigma_cam: float,
+    ) -> LocalizerResult:
+        """Bayes-обновить состояние фильтра внешним XYZ-наблюдением.
+
+        Используется, когда есть второй сенсор (например, визуальная локализация
+        по курсовой камере), который периодически сообщает абсолютные координаты
+        дрона на трассе с известной точностью ``sigma_cam`` (м, изотропный шум).
+
+        Метод ортогонален обычным стиковым обновлениям ``update()`` — их можно
+        вызывать в любом порядке.  Если оба источника информируют о позиции,
+        их Bayes-веса перемножаются естественно.
+
+        Parameters
+        ----------
+        xyz_obs   : (3,) наблюдаемая позиция в системе координат трассы, м
+        sigma_cam : СКО точности камеры, м
+
+        Returns
+        -------
+        LocalizerResult с обновлёнными полями position_xyz, s, progress.
+        """
+        if not self._initialized:
+            self.reset()
+        s_est, sigma = self._pf.inject_position_observation(xyz_obs, sigma_cam)
+        xyz = self.ref.pos_at_s(s_est)
         return LocalizerResult(
             position_xyz=xyz,
             s=s_est,

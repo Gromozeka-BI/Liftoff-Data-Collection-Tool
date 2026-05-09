@@ -14,21 +14,21 @@
     }
   },
   "pilot": "Gromozeka",
-  "drone": "LiftOff_200",
+  "drone": "MadTrainer",
   "rate": "Gromozeka_rate",
   "camera": "45 deg / 130 FOV",
   "track": "MAD FGDR 2026 Las Vegas TeamRace",
-  "ds_mode": "both",
+  "ds_mode": "rc",
   "com_port": "COM3",
   "video_source_index": 1,
-  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_6",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_6",
+  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_8",
+  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_8",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
   "race": {
     "pip_pos": [
-      1074,
-      241
+      53,
+      1
     ]
   },
   "window": {

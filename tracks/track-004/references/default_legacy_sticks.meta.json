@@ -1,0 +1,12 @@
+{
+  "track_id": "track-004",
+  "profile": "default_legacy_sticks",
+  "built_at": "2026-05-09T14:43:45+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_7",
+  "lap_index": 6,
+  "smooth_w": 5,
+  "track_length_m": 255.62738138002737,
+  "frames": 2404,
+  "metrics": {},
+  "feature_kind": "legacy_sticks"
+}

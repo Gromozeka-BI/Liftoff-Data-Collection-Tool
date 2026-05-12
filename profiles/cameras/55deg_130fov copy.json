@@ -1,0 +1,7 @@
+{
+  "id": "55deg_130fov",
+  "name": "55 deg / 130 FOV",
+  "angle_deg": 55,
+  "fov_deg": 130,
+  "resolution": [1920, 1080]
+}

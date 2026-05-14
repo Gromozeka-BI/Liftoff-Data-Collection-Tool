@@ -39,6 +39,8 @@ from dct.camera_localization import CameraObservation, read_observations_jsonl
 from dct.localization import OnlineLocalizer
 from dct.localization import reference_builder as refbuild
 from dct.localization.kf_layer2 import KFLayer2
+from dct.mavlink_geo import TrackGeoTransform, build_transform_from_settings
+from dct.mavlink_sender import MavlinkUdpSender
 from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1
 from dct.session import load_meta
 from dct.video_preview_source import VideoPreviewSource
@@ -80,10 +82,13 @@ class MainWindow(QMainWindow):
         self._localizer: OnlineLocalizer | None = None
         self._localizer_rc: OnlineLocalizer | None = None
         self._localizer_legacy: OnlineLocalizer | None = None
+        self._localizer_cam: OnlineLocalizer | None = None
         self._kf_layer2: KFLayer2 | None = None
+        self._kf_layer2_cam: KFLayer2 | None = None
         self._prev_ts_wall: float | None = None
         self._prev_rc_ts_wall: float | None = None
         self._prev_kf_ts_wall: float | None = None
+        self._prev_cam_ts_wall: float | None = None
         self._record_ds_mode: str = "liftoff"
         self._current_rate_profile: dict | None = None  # rate profile of current session
         self._last_loc: tuple[float, float] | None = None
@@ -94,12 +99,17 @@ class MainWindow(QMainWindow):
         self._last_rc_loc: tuple[float, float, float, float] | None = None
         self._last_legacy_loc: tuple[float, float, float, float] | None = None
         self._last_kf_loc: tuple[float, float, float, float] | None = None
+        self._last_cam_loc: tuple[float, float, float, float] | None = None
         self._localizer_start_prior: tuple[np.ndarray, float] | None = None
         self._last_replay_path: str | None = None
         self._camera_observations: list[CameraObservation] = []
         self._camera_obs_ts: np.ndarray = np.array([], dtype=float)
         self._camera_observations_path: Path | None = None
+        self._last_camera_injected_frame_idx: int | None = None
+        self._camera_injected_frame_idxs: set[int] = set()
         self._race_pip: VideoPiP | None = None
+        self._mavlink_sender: MavlinkUdpSender | None = None
+        self._mavlink_transform: TrackGeoTransform | None = None
 
         self._build_ui()
         self._connect_signals()
@@ -195,6 +205,7 @@ class MainWindow(QMainWindow):
 
         self._replay_page.session_selected.connect(self._on_replay_session_selected)
         self._replay_page.localizer_settings_changed.connect(self._on_replay_loc_settings_changed)
+        self._replay_page.mavlink_settings_changed.connect(self._on_replay_mavlink_settings_changed)
         self._replay_page.reset_filter_button().clicked.connect(self._reset_localizer)
 
         # Keep pages in sync with invert checkboxes so dialogs use the right convention
@@ -241,6 +252,8 @@ class MainWindow(QMainWindow):
             self._sidebar.set_page(PAGE_SETUP)
             self._bottom.set_record_mode()
             self._start_preview(self._setup_page.current_video_source())
+            self._close_mavlink_sender()
+            self._mavlink_transform = None
         else:
             self._sidebar.set_page(PAGE_REPLAY)
             self._bottom.set_replay_mode()
@@ -250,6 +263,7 @@ class MainWindow(QMainWindow):
             # Re-init localizer immediately if a session was already selected.
             if self._last_replay_path:
                 self._try_init_localizer_for_replay(Path(self._last_replay_path))
+            self._configure_replay_mavlink()
 
         self._map.clear_trail()
         self._video.set_gate_overlay(None)
@@ -325,10 +339,13 @@ class MainWindow(QMainWindow):
         self._localizer = None
         self._localizer_rc = None
         self._localizer_legacy = None
+        self._localizer_cam = None
         self._kf_layer2 = None
+        self._kf_layer2_cam = None
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
         self._prev_kf_ts_wall = None
+        self._prev_cam_ts_wall = None
         self._current_rate_profile = None
         self._last_loc = None
         self._dual_loc_log_mono = 0.0
@@ -338,6 +355,7 @@ class MainWindow(QMainWindow):
         self._last_rc_loc = None
         self._last_legacy_loc = None
         self._last_kf_loc = None
+        self._last_cam_loc = None
         self._localizer_start_prior = None
         self._map.clear_localizer_overlay()
         self._map.update_hud(self._latest_frame, None, has_gt=(self._latest_frame is not None))
@@ -384,8 +402,10 @@ class MainWindow(QMainWindow):
             self._localizer = None
             self._localizer_rc = None
             self._localizer_legacy = None
+            self._localizer_cam = None
             self._prev_ts_wall = None
             self._prev_rc_ts_wall = None
+            self._prev_cam_ts_wall = None
 
             ds = cfg.get("data_source", "liftoff")
             obs_sigma: float = float(cfg.get("obs_sigma", 1.5))
@@ -474,6 +494,16 @@ class MainWindow(QMainWindow):
             else:
                 self._kf_layer2 = None
 
+            if bf_path is not None:
+                self._localizer_cam = OnlineLocalizer.from_file(bf_path, **_pf_extra)
+                self._reset_one_localizer(self._localizer_cam)
+                self._kf_layer2_cam = KFLayer2(self._localizer_cam.ref)
+                self._kf_layer2_cam.reset()
+                _log.info("CamKF replay localizer initialized (RC-driven)")
+            else:
+                self._localizer_cam = None
+                self._kf_layer2_cam = None
+
         except Exception as exc:
             _log.error("Localizer init failed: %s", exc)
             QMessageBox.warning(self, "Localizer", f"Не удалось загрузить эталон:\n{exc}")
@@ -481,6 +511,8 @@ class MainWindow(QMainWindow):
             self._localizer = None
             self._localizer_rc = None
             self._localizer_legacy = None
+            self._localizer_cam = None
+            self._kf_layer2_cam = None
 
     def _track_start_prior(self) -> tuple[np.ndarray, float] | None:
         if not self._current_track:
@@ -515,6 +547,7 @@ class MainWindow(QMainWindow):
             self._localizer is None
             and self._localizer_rc is None
             and self._localizer_legacy is None
+            and self._localizer_cam is None
         ):
             return
         try:
@@ -524,11 +557,14 @@ class MainWindow(QMainWindow):
                 self._reset_one_localizer(self._localizer_rc)
             if self._localizer_legacy is not None:
                 self._reset_one_localizer(self._localizer_legacy)
+            if self._localizer_cam is not None:
+                self._reset_one_localizer(self._localizer_cam)
         except Exception:
             pass
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
         self._prev_kf_ts_wall = None
+        self._prev_cam_ts_wall = None
         self._dual_loc_log_mono = 0.0
         self._last_lf_sticks = None
         self._last_rc_sticks = None
@@ -536,8 +572,11 @@ class MainWindow(QMainWindow):
         self._last_rc_loc = None
         self._last_legacy_loc = None
         self._last_kf_loc = None
+        self._last_cam_loc = None
         if self._kf_layer2 is not None:
             self._kf_layer2.reset()
+        if self._kf_layer2_cam is not None:
+            self._kf_layer2_cam.reset()
         self._map.clear_localizer_overlay()
         self._last_loc = None
         self._map.update_hud(self._latest_frame, None, has_gt=(self._latest_frame is not None))
@@ -565,6 +604,8 @@ class MainWindow(QMainWindow):
             locs["Legacy"] = (self._last_legacy_loc[2], self._last_legacy_loc[3])
         if self._last_kf_loc is not None:
             locs["KF"] = (self._last_kf_loc[2], self._last_kf_loc[3])
+        if self._last_cam_loc is not None:
+            locs["CamKF"] = (self._last_cam_loc[2], self._last_cam_loc[3])
         return locs if locs else None
 
     @staticmethod
@@ -796,6 +837,8 @@ class MainWindow(QMainWindow):
             [obs.timestamp for obs in self._camera_observations],
             dtype=float,
         )
+        self._last_camera_injected_frame_idx = None
+        self._camera_injected_frame_idxs.clear()
         self._video.set_gate_overlay(None)
         if self._race_pip is not None:
             self._race_pip.video.set_gate_overlay(None)
@@ -831,11 +874,133 @@ class MainWindow(QMainWindow):
         overlay = obs.to_overlay_dict()
         return [overlay] if overlay is not None else None
 
+    def _camera_injection_for_ts(
+        self,
+        ts_wall: float,
+        max_age_s: float = 0.2,
+        max_sigma_m: float = 10.0,
+    ) -> CameraObservation | None:
+        if len(self._camera_obs_ts) == 0:
+            return None
+        insert_idx = int(np.searchsorted(self._camera_obs_ts, ts_wall))
+        candidates = []
+        if insert_idx < len(self._camera_observations):
+            candidates.append(insert_idx)
+        if insert_idx > 0:
+            candidates.append(insert_idx - 1)
+        for idx in sorted(
+            candidates,
+            key=lambda i: abs(float(ts_wall) - self._camera_observations[i].timestamp),
+        ):
+            obs = self._camera_observations[idx]
+            if abs(float(ts_wall) - obs.timestamp) > max_age_s:
+                continue
+            if (
+                obs.frame_idx is not None
+                and obs.frame_idx in self._camera_injected_frame_idxs
+            ):
+                continue
+            if not obs.inject_ready or obs.sigma_cam > max_sigma_m:
+                continue
+            return obs
+        return None
+
     def _update_camera_video_overlay(self, ts_wall: float) -> None:
         overlay = self._camera_overlay_for_ts(ts_wall)
         self._video.set_gate_overlay(overlay)
         if self._race_pip is not None:
             self._race_pip.video.set_gate_overlay(overlay)
+
+    def _update_replay_cam_localizer(self, sticks: list[float], ts: float) -> None:
+        if self._mode != MODE_REPLAY or self._localizer_cam is None:
+            return
+        max_camera_innovation_m = 15.0
+        min_sigma_eff_m = 4.0
+        sigma_scale = 1.5
+        dt = (ts - self._prev_cam_ts_wall) if self._prev_cam_ts_wall is not None else None
+        if dt is not None and (dt < 0 or dt > 2.0):
+            dt = None
+        self._prev_cam_ts_wall = ts
+        res_cam = self._localizer_cam.update(
+            sticks,
+            dt,
+            rate_profile=self._current_rate_profile,
+        )
+        obs = self._camera_injection_for_ts(ts)
+        injected = obs is not None
+        if obs is not None:
+            pre_xyz = np.asarray(res_cam.position_xyz, dtype=float)
+            pre_sigma = float(res_cam.uncertainty_m)
+            obs_xyz = obs.xyz_array
+            innovation_xz = float(np.linalg.norm(obs_xyz[[0, 2]] - pre_xyz[[0, 2]]))
+            if innovation_xz > max_camera_innovation_m:
+                _log.info(
+                    "CamKF inject skipped ts=%.3f frame=%s gate=%s sigma_cam=%.2f "
+                    "innovation_xz=%.2f max=%.2f obs_xyz=(%.2f,%.2f,%.2f) pre_xz=(%.2f,%.2f)",
+                    ts,
+                    obs.frame_idx,
+                    obs.gate_id,
+                    float(obs.sigma_cam),
+                    innovation_xz,
+                    max_camera_innovation_m,
+                    float(obs_xyz[0]),
+                    float(obs_xyz[1]),
+                    float(obs_xyz[2]),
+                    float(pre_xyz[0]),
+                    float(pre_xyz[2]),
+                )
+                injected = False
+                obs = None
+            else:
+                sigma_eff = max(float(obs.sigma_cam) * sigma_scale, min_sigma_eff_m)
+                res_cam = self._localizer_cam.inject_position_observation(
+                    obs_xyz,
+                    sigma_eff,
+                )
+                self._last_camera_injected_frame_idx = obs.frame_idx
+                if obs.frame_idx is not None:
+                    self._camera_injected_frame_idxs.add(obs.frame_idx)
+                post_xyz = np.asarray(res_cam.position_xyz, dtype=float)
+                _log.info(
+                    "CamKF inject ts=%.3f frame=%s gate=%s sigma_cam=%.2f sigma_eff=%.2f "
+                    "innovation_xz=%.2f obs_xyz=(%.2f,%.2f,%.2f) pre_xz=(%.2f,%.2f) "
+                    "pre_sigma=%.2f post_xz=(%.2f,%.2f) post_sigma=%.2f dxz=(%.2f,%.2f)",
+                    ts,
+                    obs.frame_idx,
+                    obs.gate_id,
+                    float(obs.sigma_cam),
+                    sigma_eff,
+                    innovation_xz,
+                    float(obs_xyz[0]),
+                    float(obs_xyz[1]),
+                    float(obs_xyz[2]),
+                    float(pre_xyz[0]),
+                    float(pre_xyz[2]),
+                    pre_sigma,
+                    float(post_xyz[0]),
+                    float(post_xyz[2]),
+                    float(res_cam.uncertainty_m),
+                    float(post_xyz[0] - pre_xyz[0]),
+                    float(post_xyz[2] - pre_xyz[2]),
+                )
+        res_out = res_cam
+        if self._kf_layer2_cam is not None:
+            if self._localizer_cam.waiting_for_throttle_start:
+                self._kf_layer2_cam.reset()
+            else:
+                res_out = self._kf_layer2_cam.update(res_cam, dt)
+        self._map.update_localizer_cam_estimate(
+            float(res_out.position_xyz[0]),
+            float(res_out.position_xyz[2]),
+            injected=injected,
+        )
+        self._last_cam_loc = (
+            float(res_out.position_xyz[0]),
+            float(res_out.position_xyz[2]),
+            float(res_out.progress),
+            float(res_out.uncertainty_m),
+        )
+        self._send_replay_mavlink_position(res_out.position_xyz, ts)
 
     @pyqtSlot()
     def _on_replay_loc_settings_changed(self) -> None:
@@ -846,6 +1011,55 @@ class MainWindow(QMainWindow):
         if self._last_replay_path:
             self._try_init_localizer_for_replay(Path(self._last_replay_path))
             self._reset_localizer_on_seek()
+
+    @pyqtSlot()
+    def _on_replay_mavlink_settings_changed(self) -> None:
+        self._configure_replay_mavlink()
+
+    def _close_mavlink_sender(self) -> None:
+        if self._mavlink_sender is not None:
+            self._mavlink_sender.close()
+        self._mavlink_sender = None
+
+    def _configure_replay_mavlink(self) -> None:
+        self._close_mavlink_sender()
+        self._mavlink_transform = None
+        settings = self._replay_page.mavlink_settings()
+        if not settings.get("enabled"):
+            return
+        self._mavlink_transform = build_transform_from_settings(
+            self._current_track,
+            settings,
+        )
+        if self._mavlink_transform is None:
+            _log.info("Replay MAVLink disabled: missing or invalid track bounds/anchors")
+            return
+        try:
+            self._mavlink_sender = MavlinkUdpSender(
+                settings["host"],
+                int(settings["port"]),
+                source_system=int(settings.get("system_id", 1)),
+                source_component=int(settings.get("component_id", 1)),
+            )
+            self._mavlink_sender.send_heartbeat(force=True)
+            _log.info(
+                "Replay MAVLink UDP enabled: %s:%s",
+                settings["host"],
+                settings["port"],
+            )
+        except Exception as exc:
+            self._mavlink_sender = None
+            self._mavlink_transform = None
+            _log.warning("Replay MAVLink init failed: %s", exc)
+
+    def _send_replay_mavlink_position(self, xyz: np.ndarray, ts_wall: float) -> None:
+        if self._mavlink_sender is None or self._mavlink_transform is None:
+            return
+        try:
+            point = self._mavlink_transform.to_geo(xyz)
+            self._mavlink_sender.send_global_position(point, ts_wall)
+        except Exception as exc:
+            _log.warning("Replay MAVLink send failed: %s", exc)
 
     # ── record session ─────────────────────────────────────────────────────
 
@@ -1004,6 +1218,10 @@ class MainWindow(QMainWindow):
             self._current_track = track_data
         else:
             self._current_track = None
+        self._replay_page.set_mavlink_track_bounds(
+            self._current_track.get("bounds") if self._current_track else None,
+        )
+        self._configure_replay_mavlink()
         # Use the unified helper so meta.json / folder name are also checked
         replay_track_id = self._session_track_id(p)
         self._replay_page.set_localizer_track(replay_track_id)
@@ -1326,6 +1544,11 @@ class MainWindow(QMainWindow):
                     except Exception as exc:
                         _log.warning("KF Layer 2 update failed: %s", exc)
 
+                try:
+                    self._update_replay_cam_localizer(list(sticks), ts)
+                except Exception as exc:
+                    _log.warning("Replay CamKF update failed: %s", exc)
+
             except Exception as exc:
                 _log.warning("Localizer RC update failed: %s", exc)
         self._map.update_hud(
@@ -1553,6 +1776,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._stop_preview()
+        self._close_mavlink_sender()
         self._bottom.cleanup()
         if self._live:
             self._live.stop_session()

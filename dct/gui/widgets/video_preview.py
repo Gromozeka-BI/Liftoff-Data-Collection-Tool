@@ -88,8 +88,8 @@ class VideoPreviewWidget(QLabel):
         self._show_placeholder()
 
     def _draw_gate_overlay(self, frame_rgb: np.ndarray, scale: float) -> None:
-        color = (197, 134, 192)  # RGB, theme.LOCALIZER_CAM
-        point_color = (255, 220, 255)
+        color = (244, 71, 71)  # RGB, theme.ERR
+        point_color = (255, 220, 220)
         for det in self._gate_overlay:
             bbox = det.get("bbox_xyxy")
             if bbox is not None and len(bbox) == 4:
@@ -106,32 +106,6 @@ class VideoPreviewWidget(QLabel):
                     cv2.circle(frame_rgb, (px, py), 3, point_color, -1)
                 if len(scaled) >= 2:
                     cv2.polylines(frame_rgb, [np.asarray(scaled, dtype=np.int32)], True, color, 1)
-
-            label = self._overlay_label(det)
-            if label and bbox is not None and len(bbox) == 4:
-                x1, y1 = int(float(bbox[0]) * scale), int(float(bbox[1]) * scale)
-                cv2.putText(
-                    frame_rgb,
-                    label,
-                    (x1, max(12, y1 - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    color,
-                    1,
-                    cv2.LINE_AA,
-                )
-
-    @staticmethod
-    def _overlay_label(det: dict[str, Any]) -> str:
-        parts = []
-        if det.get("gate_id") is not None:
-            parts.append(f"gate {det['gate_id']}")
-        if det.get("confidence") is not None:
-            try:
-                parts.append(f"{float(det['confidence']):.2f}")
-            except Exception:
-                pass
-        return " ".join(parts)
 
     def _show_placeholder(self) -> None:
         self.setText("[ Video Preview ]")

@@ -1,0 +1,14 @@
+{
+  "n_sessions": 6,
+  "mean_kf_p90": 8.060214837787031,
+  "mean_camkf_p90": 8.065354161419796,
+  "mean_improvement_pct": -0.0008965834882834674,
+  "total_duration_s": 1299.466323852539,
+  "total_injected": 220,
+  "total_skipped_innovation": 176,
+  "overall_inject_rate_hz": 0.1693002703969766,
+  "overall_seconds_per_inject": 5.906665108420632,
+  "overall_median_inject_period_s": 2.5265090465545654,
+  "overall_mean_inject_period_s": 5.462942533403914,
+  "overall_max_inject_gap_s": 38.853456020355225
+}

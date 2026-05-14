@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections import deque
 from typing import Any
 
@@ -497,6 +498,7 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc5_arrow.setZValue(10)
         self._loc5_arrow.setOpacity(0.0)
         self.addItem(self._loc5_arrow)
+        self._loc5_flash_until = 0.0
 
         self._has_track = False
 
@@ -640,8 +642,10 @@ class TrackMapWidget(pg.PlotWidget):
                 tang_deg = math.degrees(math.atan2(dz, dx))
                 self._loc4_arrow.setStyle(angle=90 - tang_deg)
 
-    def update_localizer_cam_estimate(self, px: float, pz: float) -> None:
+    def update_localizer_cam_estimate(self, px: float, pz: float, injected: bool = False) -> None:
         """Оценка camera-fused контура (PF + camera inject + KF), фиолетовый."""
+        if injected:
+            self._loc5_flash_until = time.monotonic() + 0.25
         self._loc5_trail_x.append(px)
         self._loc5_trail_z.append(pz)
         visible = self._marker_visible.get("CamKF", False)
@@ -650,13 +654,16 @@ class TrackMapWidget(pg.PlotWidget):
         else:
             self._loc5_trail_item.setData([], [])
         self._loc5_arrow.setPos(px, pz)
+        flash_active = time.monotonic() < self._loc5_flash_until
+        arrow_color = theme.ERR if flash_active else theme.LOCALIZER_CAM
+        self._loc5_arrow.setStyle(brush=pg.mkBrush(arrow_color))
         self._loc5_arrow.setOpacity(1.0 if (self._show_loc_arrow and visible) else 0.0)
         if len(self._loc5_trail_x) >= 2:
             dx = self._loc5_trail_x[-1] - self._loc5_trail_x[-2]
             dz = self._loc5_trail_z[-1] - self._loc5_trail_z[-2]
             if dx * dx + dz * dz > 1e-8:
                 tang_deg = math.degrees(math.atan2(dz, dx))
-                self._loc5_arrow.setStyle(angle=90 - tang_deg)
+                self._loc5_arrow.setStyle(angle=90 - tang_deg, brush=pg.mkBrush(arrow_color))
 
     # ── visibility toggles ────────────────────────────────────────────────
 

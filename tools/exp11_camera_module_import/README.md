@@ -1,47 +1,49 @@
-# Experiment 11: Camera Module Import
+# Эксперимент 11: импорт камерного модуля
 
-This folder tracks the staged import of the FPV camera localization module into
-DCT.
+Эта папка содержит материалы по поэтапному импорту FPV-модуля камерной
+локализации в DCT.
 
-Primary plan:
+Основной план:
 
 - `docs/camera_module_import_plan.md`
 
-Initial scope:
+Начальный объём работ:
 
-1. Import geometry/PnP code from `FPVCamDetectV2`.
-2. Import YOLO label adapter from `FPVCamDetectV2`.
-3. Generate offline `CameraObservation` files.
-4. Test guarded fusion with `OnlineLocalizer.inject_position_observation(...)`.
+1. Импортировать геометрию и PnP-код из `FPVCamDetectV2`.
+2. Импортировать адаптер YOLO-разметки из `FPVCamDetectV2`.
+3. Генерировать offline-файлы `CameraObservation`.
+4. Проверить защищённое слияние через `OnlineLocalizer.inject_position_observation(...)`.
 
-## Smoke Test
+## Дымовой тест
 
-Run the imported adapter + localization chain on an annotated calibration frame:
+Запуск импортированного адаптера и цепочки локализации на размеченном
+калибровочном кадре:
 
 ```bash
 python tools/exp11_camera_module_import/smoke_camera_import.py
 ```
 
-Multi-gate sample:
+Пример с несколькими воротами:
 
 ```bash
 python tools/exp11_camera_module_import/smoke_camera_import.py --section multi_frames --frame-idx 0 --q-m 10 --coarse-offset-x 0
 ```
 
-The script converts imported calibration keypoints into a temporary YOLO-pose
-label, loads it through `yolo_gate_adapter`, and runs `CoarseRefineLocalizer`.
+Скрипт преобразует импортированные калибровочные keypoints во временную
+YOLO-pose-разметку, загружает её через `yolo_gate_adapter` и запускает
+`CoarseRefineLocalizer`.
 
-## Imported Extras
+## Дополнительно импортировано
 
-Also imported:
+Также импортированы:
 
-- `dct/camera_localization/calibration_tools/` for reproducing
+- `dct/camera_localization/calibration_tools/` для воспроизведения
   `camera_calibration.json`;
-- `docs/camera/fpv_imported/` with reference design documents from
+- `docs/camera/fpv_imported/` с исходными проектными документами из
   `FPVCamDetectV2`;
-- `dct/camera_localization/experimental/pnp_solver_2/` as a comparison-only
-  AP3P/LM prototype.
+- `dct/camera_localization/experimental/pnp_solver_2/` как сравнительный
+  прототип AP3P/LM.
 
-`pnp_solver_2` is not part of the default runtime path because its current
-validation has large multi-gate outliers.
+`pnp_solver_2` не входит в основной путь выполнения, потому что текущая проверка
+показывает большие выбросы на сценах с несколькими воротами.
 

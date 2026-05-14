@@ -1,0 +1,9 @@
+path: models/yolo/TestGate_2
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: gate
+kpt_shape:
+- 4
+- 3

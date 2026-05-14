@@ -1,0 +1,24 @@
+{
+  "id": "testgate",
+  "source_project": "FPVCamDetect",
+  "task": "pose",
+  "base_model": "yolo11n-pose.pt",
+  "weights": "models/yolo_gate_pose/testgate/weights/best.pt",
+  "fallback_weights": "models/yolo_gate_pose/testgate/weights/last.pt",
+  "dataset": "models/yolo/TestGate_2/data.yaml",
+  "image_size_px": 640,
+  "class_names": {
+    "0": "gate"
+  },
+  "keypoint_shape": [
+    4,
+    3
+  ],
+  "keypoint_order": [
+    "TL",
+    "TR",
+    "BR",
+    "BL"
+  ],
+  "notes": "Experimental YOLO gate pose model imported for DCT camera localization."
+}

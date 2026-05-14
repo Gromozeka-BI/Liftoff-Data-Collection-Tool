@@ -1,0 +1,1977 @@
+{
+  "description": "12 кадров Liftoff-сессии (session_001), размеченных вручную в CVAT. 6 из них — кропы одного гейта (задание fov_cvat_session_001, используются для FOV-калибровки). Ещё 6 — полные кадры с несколькими гейтами (задание multi_gate_cvat_session_001, используются для уточнения репроекции). Для каждого кадра указано истинное положение дрона из телеметрии симулятора.",
+  "track_id": "MAD FGDR 2026 Abu-Dhabi TeamRace",
+  "image_size": [
+    1280,
+    720
+  ],
+  "axis_convention": "x,z horizontal; y vertical; track position is bottom center; yaw is rotation[1] around Y",
+  "keypoint_schema": {
+    "1": "inner_top_left",
+    "2": "inner_top_right",
+    "3": "inner_bottom_right",
+    "4": "inner_bottom_left"
+  },
+  "ground_truth_source": "outputs/session_001_full/frame_telemetry.json",
+  "fov_frames": [
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000107_gate_0.jpg",
+      "frame_index": 107,
+      "annotations": [
+        {
+          "gate_id": 0,
+          "gate_world": {
+            "gate_id": 0,
+            "name": "Старт-Финиш",
+            "center_world": [
+              25.57,
+              0.78,
+              7.33
+            ],
+            "bottom_center_world": [
+              25.57,
+              0.0,
+              7.33
+            ],
+            "yaw_deg": 90.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                25.57,
+                1.56,
+                8.11
+              ],
+              "inner_top_right": [
+                25.57,
+                1.56,
+                6.55
+              ],
+              "inner_bottom_right": [
+                25.57,
+                0.0,
+                6.55
+              ],
+              "inner_bottom_left": [
+                25.57,
+                0.0,
+                8.11
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 545.05,
+              "y_px": 299.27
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 686.84,
+              "y_px": 295.25
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 684.03,
+              "y_px": 423.86
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 559.09,
+              "y_px": 430.88
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 22.272455,
+          "y": 1.742772,
+          "z": 7.332335
+        },
+        "quaternion_world_body": {
+          "x": 0.3360444903373718,
+          "y": 0.6303060054779053,
+          "z": -0.37547606229782104,
+          "w": 0.5905981063842773
+        },
+        "yaw_deg": 92.38,
+        "timestamp_sec": 3.590559244155884,
+        "time_error_sec": 0.00043392181396484375
+      }
+    },
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000111_gate_0.jpg",
+      "frame_index": 111,
+      "annotations": [
+        {
+          "gate_id": 0,
+          "gate_world": {
+            "gate_id": 0,
+            "name": "Старт-Финиш",
+            "center_world": [
+              25.57,
+              0.78,
+              7.33
+            ],
+            "bottom_center_world": [
+              25.57,
+              0.0,
+              7.33
+            ],
+            "yaw_deg": 90.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                25.57,
+                1.56,
+                8.11
+              ],
+              "inner_top_right": [
+                25.57,
+                1.56,
+                6.55
+              ],
+              "inner_bottom_right": [
+                25.57,
+                0.0,
+                6.55
+              ],
+              "inner_bottom_left": [
+                25.57,
+                0.0,
+                8.11
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 466.61,
+              "y_px": 272.74
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 732.68,
+              "y_px": 264.74
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 722.58,
+              "y_px": 487.19
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 506.85,
+              "y_px": 506.98
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 23.801266,
+          "y": 1.444184,
+          "z": 7.312629
+        },
+        "quaternion_world_body": {
+          "x": 0.3215559124946594,
+          "y": 0.6390281915664673,
+          "z": -0.3765018582344055,
+          "w": 0.5886350274085999
+        },
+        "yaw_deg": 92.64,
+        "timestamp_sec": 3.7285916805267334,
+        "time_error_sec": 0.000186920166015625
+      }
+    },
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000160_gate_2.jpg",
+      "frame_index": 160,
+      "annotations": [
+        {
+          "gate_id": 2,
+          "gate_world": {
+            "gate_id": 2,
+            "name": "Ворота 2",
+            "center_world": [
+              56.68,
+              0.78,
+              13.2
+            ],
+            "bottom_center_world": [
+              56.68,
+              0.0,
+              13.2
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                55.9,
+                1.56,
+                13.2
+              ],
+              "inner_top_right": [
+                57.46,
+                1.56,
+                13.2
+              ],
+              "inner_bottom_right": [
+                57.46,
+                0.0,
+                13.2
+              ],
+              "inner_bottom_left": [
+                55.9,
+                0.0,
+                13.2
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 883.05,
+              "y_px": 387.78
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 986.76,
+              "y_px": 467.65
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 891.61,
+              "y_px": 543.23
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 801.5,
+              "y_px": 466.2
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 53.825714,
+          "y": 0.562927,
+          "z": 8.412519
+        },
+        "quaternion_world_body": {
+          "x": 0.41686955094337463,
+          "y": 0.035401683300733566,
+          "z": 0.35455596446990967,
+          "w": 0.8362157344818115
+        },
+        "yaw_deg": 28.63,
+        "timestamp_sec": 5.34891152381897,
+        "time_error_sec": 4.1961669921875e-05
+      }
+    },
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000164_gate_3.jpg",
+      "frame_index": 164,
+      "annotations": [
+        {
+          "gate_id": 3,
+          "gate_world": {
+            "gate_id": 3,
+            "name": "Ворота 3",
+            "center_world": [
+              54.58,
+              0.78,
+              13.2
+            ],
+            "bottom_center_world": [
+              54.58,
+              0.0,
+              13.2
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                53.8,
+                1.56,
+                13.2
+              ],
+              "inner_top_right": [
+                55.36,
+                1.56,
+                13.2
+              ],
+              "inner_bottom_right": [
+                55.36,
+                0.0,
+                13.2
+              ],
+              "inner_bottom_left": [
+                53.8,
+                0.0,
+                13.2
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 760.64,
+              "y_px": 245.37
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 893.77,
+              "y_px": 329.46
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 756.02,
+              "y_px": 444.31
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 667.22,
+              "y_px": 345.23
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 55.742073,
+          "y": 0.569687,
+          "z": 10.016601
+        },
+        "quaternion_world_body": {
+          "x": 0.3414020836353302,
+          "y": -0.13544867932796478,
+          "z": 0.46754011511802673,
+          "w": 0.8040550947189331
+        },
+        "yaw_deg": 7.91,
+        "timestamp_sec": 5.489970684051514,
+        "time_error_sec": 0.0024814605712890625
+      }
+    },
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000235_gate_4.jpg",
+      "frame_index": 235,
+      "annotations": [
+        {
+          "gate_id": 4,
+          "gate_world": {
+            "gate_id": 4,
+            "name": "Ворота 4",
+            "center_world": [
+              56.68,
+              0.78,
+              31.08
+            ],
+            "bottom_center_world": [
+              56.68,
+              0.0,
+              31.08
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                55.9,
+                1.56,
+                31.08
+              ],
+              "inner_top_right": [
+                57.46,
+                1.56,
+                31.08
+              ],
+              "inner_bottom_right": [
+                57.46,
+                0.0,
+                31.08
+              ],
+              "inner_bottom_left": [
+                55.9,
+                0.0,
+                31.08
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 572.54,
+              "y_px": 276.35
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 686.09,
+              "y_px": 285.64
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 674.44,
+              "y_px": 394.48
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 569.24,
+              "y_px": 388.56
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 56.583298,
+          "y": 1.059452,
+          "z": 26.744633
+        },
+        "quaternion_world_body": {
+          "x": -0.4475654065608978,
+          "y": -0.044241875410079956,
+          "z": -0.018100591376423836,
+          "w": -0.8929728269577026
+        },
+        "yaw_deg": 9.08,
+        "timestamp_sec": 7.859038829803467,
+        "time_error_sec": 5.245208740234375e-05
+      }
+    },
+    {
+      "task": "fov_cvat_session_001",
+      "purpose": "single-gate FOV calibration",
+      "image_filename": "frame_000289_gate_7.jpg",
+      "frame_index": 289,
+      "annotations": [
+        {
+          "gate_id": 7,
+          "gate_world": {
+            "gate_id": 7,
+            "name": "Ворота 7",
+            "center_world": [
+              51.41,
+              0.78,
+              31.08
+            ],
+            "bottom_center_world": [
+              51.41,
+              0.0,
+              31.08
+            ],
+            "yaw_deg": 180.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                52.19,
+                1.56,
+                31.08
+              ],
+              "inner_top_right": [
+                50.629999999999995,
+                1.56,
+                31.08
+              ],
+              "inner_bottom_right": [
+                50.629999999999995,
+                0.0,
+                31.08
+              ],
+              "inner_bottom_left": [
+                52.19,
+                0.0,
+                31.08
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 419.57,
+              "y_px": 212.68
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 607.52,
+              "y_px": 227.1
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 601.28,
+              "y_px": 391.64
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 439.09,
+              "y_px": 391.57
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 50.7547,
+          "y": 0.988042,
+          "z": 33.950897
+        },
+        "quaternion_world_body": {
+          "x": -0.02021833322942257,
+          "y": 0.872346818447113,
+          "z": -0.4821852445602417,
+          "w": -0.07810100167989731
+        },
+        "yaw_deg": -167.41,
+        "timestamp_sec": 9.628337860107422,
+        "time_error_sec": 0.0033965110778808594
+      }
+    }
+  ],
+  "multi_frames": [
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000158.jpg",
+      "frame_index": 158,
+      "annotations": [
+        {
+          "gate_id": 3,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 3,
+            "name": "Ворота 3",
+            "center_world": [
+              54.58,
+              0.78,
+              13.2
+            ],
+            "bottom_center_world": [
+              54.58,
+              0.0,
+              13.2
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                53.8,
+                1.56,
+                13.2
+              ],
+              "inner_top_right": [
+                55.36,
+                1.56,
+                13.2
+              ],
+              "inner_bottom_right": [
+                55.36,
+                0.0,
+                13.2
+              ],
+              "inner_bottom_left": [
+                53.8,
+                0.0,
+                13.2
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 745.03,
+              "y_px": 308.52
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 814.39,
+              "y_px": 361.63
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 756.22,
+              "y_px": 427.27
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 689.81,
+              "y_px": 378.6
+            }
+          ]
+        },
+        {
+          "gate_id": 2,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 2,
+            "name": "Ворота 2",
+            "center_world": [
+              56.68,
+              0.78,
+              13.2
+            ],
+            "bottom_center_world": [
+              56.68,
+              0.0,
+              13.2
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                55.9,
+                1.56,
+                13.2
+              ],
+              "inner_top_right": [
+                57.46,
+                1.56,
+                13.2
+              ],
+              "inner_bottom_right": [
+                57.46,
+                0.0,
+                13.2
+              ],
+              "inner_bottom_left": [
+                55.9,
+                0.0,
+                13.2
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 839.94,
+              "y_px": 380.56
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 908.82,
+              "y_px": 432.19
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 847.79,
+              "y_px": 493.28
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 782.83,
+              "y_px": 448.92
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 52.869907,
+          "y": 0.576713,
+          "z": 7.89889
+        },
+        "quaternion_world_body": {
+          "x": 0.43372052907943726,
+          "y": 0.10295259952545166,
+          "z": 0.29913848638534546,
+          "w": 0.8436844348907471
+        },
+        "yaw_deg": 35.71,
+        "timestamp_sec": 5.279400110244751,
+        "time_error_sec": 0.001375436782836914
+      }
+    },
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000232.jpg",
+      "frame_index": 232,
+      "annotations": [
+        {
+          "gate_id": 7,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 7,
+            "name": "Ворота 7",
+            "center_world": [
+              51.41,
+              0.78,
+              31.08
+            ],
+            "bottom_center_world": [
+              51.41,
+              0.0,
+              31.08
+            ],
+            "yaw_deg": 180.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                52.19,
+                1.56,
+                31.08
+              ],
+              "inner_top_right": [
+                50.629999999999995,
+                1.56,
+                31.08
+              ],
+              "inner_bottom_right": [
+                50.629999999999995,
+                0.0,
+                31.08
+              ],
+              "inner_bottom_left": [
+                52.19,
+                0.0,
+                31.08
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 310.7,
+              "y_px": 271.99
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 398.03,
+              "y_px": 277.15
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 400.95,
+              "y_px": 354.62
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 319.05,
+              "y_px": 351.65
+            }
+          ]
+        },
+        {
+          "gate_id": 4,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 4,
+            "name": "Ворота 4",
+            "center_world": [
+              56.68,
+              0.78,
+              31.08
+            ],
+            "bottom_center_world": [
+              56.68,
+              0.0,
+              31.08
+            ],
+            "yaw_deg": 0.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                55.9,
+                1.56,
+                31.08
+              ],
+              "inner_top_right": [
+                57.46,
+                1.56,
+                31.08
+              ],
+              "inner_bottom_right": [
+                57.46,
+                0.0,
+                31.08
+              ],
+              "inner_bottom_left": [
+                55.9,
+                0.0,
+                31.08
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 591.21,
+              "y_px": 289.0
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 664.18,
+              "y_px": 293.1
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 657.34,
+              "y_px": 363.75
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 588.98,
+              "y_px": 361.18
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 56.355003,
+          "y": 0.987622,
+          "z": 24.637724
+        },
+        "quaternion_world_body": {
+          "x": -0.4469347298145294,
+          "y": -0.05439972132444382,
+          "z": -0.0011954630026593804,
+          "w": -0.8929102420806885
+        },
+        "yaw_deg": 9.38,
+        "timestamp_sec": 7.7388246059417725,
+        "time_error_sec": 0.0039577484130859375
+      }
+    },
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000359.jpg",
+      "frame_index": 359,
+      "annotations": [
+        {
+          "gate_id": 9,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 9,
+            "name": "Ворота 9",
+            "center_world": [
+              38.83,
+              2.635,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              1.855,
+              33.08
+            ],
+            "yaw_deg": 325.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                38.19106140545458,
+                3.415,
+                32.63261037964618
+              ],
+              "inner_top_right": [
+                39.46893859454541,
+                3.415,
+                33.527389620353816
+              ],
+              "inner_bottom_right": [
+                39.46893859454541,
+                1.855,
+                33.527389620353816
+              ],
+              "inner_bottom_left": [
+                38.19106140545458,
+                1.855,
+                32.63261037964618
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 658.58,
+              "y_px": 297.43
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 712.39,
+              "y_px": 315.22
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 698.69,
+              "y_px": 377.33
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 642.65,
+              "y_px": 366.61
+            }
+          ]
+        },
+        {
+          "gate_id": 10,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 10,
+            "name": "Ворота 10",
+            "center_world": [
+              38.83,
+              0.78,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              0.0,
+              33.08
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                39.46893859454541,
+                1.56,
+                33.527389620353816
+              ],
+              "inner_top_right": [
+                38.19106140545458,
+                1.56,
+                32.63261037964618
+              ],
+              "inner_bottom_right": [
+                38.19106140545458,
+                0.0,
+                32.63261037964618
+              ],
+              "inner_bottom_left": [
+                39.46893859454541,
+                0.0,
+                33.527389620353816
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 640.09,
+              "y_px": 381.31
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 694.79,
+              "y_px": 391.4
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 680.69,
+              "y_px": 453.34
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 624.74,
+              "y_px": 450.03
+            }
+          ]
+        },
+        {
+          "gate_id": 11,
+          "cvat_skel_order": 2,
+          "gate_world": {
+            "gate_id": 11,
+            "name": "Ворота 11",
+            "center_world": [
+              37.11,
+              0.78,
+              31.87
+            ],
+            "bottom_center_world": [
+              37.11,
+              0.0,
+              31.87
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                37.748938594545415,
+                1.56,
+                32.317389620353815
+              ],
+              "inner_top_right": [
+                36.471061405454584,
+                1.56,
+                31.422610379646184
+              ],
+              "inner_bottom_right": [
+                36.471061405454584,
+                0.0,
+                31.422610379646184
+              ],
+              "inner_bottom_left": [
+                37.748938594545415,
+                0.0,
+                32.317389620353815
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 540.02,
+              "y_px": 362.77
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 614.65,
+              "y_px": 375.83
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 598.33,
+              "y_px": 448.02
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 522.46,
+              "y_px": 443.56
+            }
+          ]
+        },
+        {
+          "gate_id": 12,
+          "cvat_skel_order": 3,
+          "gate_world": {
+            "gate_id": 12,
+            "name": "Ворота 12",
+            "center_world": [
+              35.39,
+              0.78,
+              30.67
+            ],
+            "bottom_center_world": [
+              35.39,
+              0.0,
+              30.67
+            ],
+            "yaw_deg": 325.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                34.751061405454585,
+                1.56,
+                30.222610379646184
+              ],
+              "inner_top_right": [
+                36.028938594545416,
+                1.56,
+                31.11738962035382
+              ],
+              "inner_bottom_right": [
+                36.028938594545416,
+                0.0,
+                31.11738962035382
+              ],
+              "inner_bottom_left": [
+                34.751061405454585,
+                0.0,
+                30.222610379646184
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 400.91,
+              "y_px": 336.48
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 505.9,
+              "y_px": 355.74
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 488.35,
+              "y_px": 439.6
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 379.69,
+              "y_px": 433.48
+            }
+          ]
+        },
+        {
+          "gate_id": 13,
+          "cvat_skel_order": 4,
+          "gate_world": {
+            "gate_id": 13,
+            "name": "Ворота 13",
+            "center_world": [
+              35.39,
+              2.635,
+              30.67
+            ],
+            "bottom_center_world": [
+              35.39,
+              1.855,
+              30.67
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                36.028938594545416,
+                3.415,
+                31.11738962035382
+              ],
+              "inner_top_right": [
+                34.751061405454585,
+                3.415,
+                30.222610379646184
+              ],
+              "inner_bottom_right": [
+                34.751061405454585,
+                1.855,
+                30.222610379646184
+              ],
+              "inner_bottom_left": [
+                36.028938594545416,
+                1.855,
+                31.11738962035382
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 426.83,
+              "y_px": 218.83
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 530.34,
+              "y_px": 253.14
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 511.46,
+              "y_px": 338.41
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 405.48,
+              "y_px": 315.83
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 39.101154,
+          "y": 2.009263,
+          "z": 26.202387
+        },
+        "quaternion_world_body": {
+          "x": -0.37394580245018005,
+          "y": 0.027794336900115013,
+          "z": -0.132010355591774,
+          "w": -0.9175867438316345
+        },
+        "yaw_deg": 3.8,
+        "timestamp_sec": 11.980774164199829,
+        "time_error_sec": 0.002700328826904297
+      }
+    },
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000370.jpg",
+      "frame_index": 370,
+      "annotations": [
+        {
+          "gate_id": 11,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 11,
+            "name": "Ворота 11",
+            "center_world": [
+              37.11,
+              0.78,
+              31.87
+            ],
+            "bottom_center_world": [
+              37.11,
+              0.0,
+              31.87
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                37.748938594545415,
+                1.56,
+                32.317389620353815
+              ],
+              "inner_top_right": [
+                36.471061405454584,
+                1.56,
+                31.422610379646184
+              ],
+              "inner_bottom_right": [
+                36.471061405454584,
+                0.0,
+                31.422610379646184
+              ],
+              "inner_bottom_left": [
+                37.748938594545415,
+                0.0,
+                32.317389620353815
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 544.09,
+              "y_px": 264.37
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 581.28,
+              "y_px": 391.19
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 403.8,
+              "y_px": 533.45
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 435.89,
+              "y_px": 370.23
+            }
+          ]
+        },
+        {
+          "gate_id": 10,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 10,
+            "name": "Ворота 10",
+            "center_world": [
+              38.83,
+              0.78,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              0.0,
+              33.08
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                39.46893859454541,
+                1.56,
+                33.527389620353816
+              ],
+              "inner_top_right": [
+                38.19106140545458,
+                1.56,
+                32.63261037964618
+              ],
+              "inner_bottom_right": [
+                38.19106140545458,
+                0.0,
+                32.63261037964618
+              ],
+              "inner_bottom_left": [
+                39.46893859454541,
+                0.0,
+                33.527389620353816
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 524.52,
+              "y_px": 194.57
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 537.44,
+              "y_px": 238.11
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 440.6,
+              "y_px": 334.62
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 453.05,
+              "y_px": 270.51
+            }
+          ]
+        },
+        {
+          "gate_id": 9,
+          "cvat_skel_order": 2,
+          "gate_world": {
+            "gate_id": 9,
+            "name": "Ворота 9",
+            "center_world": [
+              38.83,
+              2.635,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              1.855,
+              33.08
+            ],
+            "yaw_deg": 325.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                38.19106140545458,
+                3.415,
+                32.63261037964618
+              ],
+              "inner_top_right": [
+                39.46893859454541,
+                3.415,
+                33.527389620353816
+              ],
+              "inner_bottom_right": [
+                39.46893859454541,
+                1.855,
+                33.527389620353816
+              ],
+              "inner_bottom_left": [
+                38.19106140545458,
+                1.855,
+                32.63261037964618
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 629.24,
+              "y_px": 83.26
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 684.19,
+              "y_px": 89.1
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 559.95,
+              "y_px": 214.68
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 540.1,
+              "y_px": 178.33
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 39.235409,
+          "y": 2.206162,
+          "z": 32.142757
+        },
+        "quaternion_world_body": {
+          "x": -0.0644838809967041,
+          "y": 0.41152286529541016,
+          "z": -0.5995914936065674,
+          "w": -0.6833599805831909
+        },
+        "yaw_deg": -36.61,
+        "timestamp_sec": 12.351852416992188,
+        "time_error_sec": 0.003715991973876953
+      }
+    },
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000494.jpg",
+      "frame_index": 494,
+      "annotations": [
+        {
+          "gate_id": 10,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 10,
+            "name": "Ворота 10",
+            "center_world": [
+              38.83,
+              0.78,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              0.0,
+              33.08
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                39.46893859454541,
+                1.56,
+                33.527389620353816
+              ],
+              "inner_top_right": [
+                38.19106140545458,
+                1.56,
+                32.63261037964618
+              ],
+              "inner_bottom_right": [
+                38.19106140545458,
+                0.0,
+                32.63261037964618
+              ],
+              "inner_bottom_left": [
+                39.46893859454541,
+                0.0,
+                33.527389620353816
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 438.27,
+              "y_px": 323.75
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 485.07,
+              "y_px": 343.59
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 389.64,
+              "y_px": 461.31
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 360.08,
+              "y_px": 414.5
+            }
+          ]
+        },
+        {
+          "gate_id": 13,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 13,
+            "name": "Ворота 13",
+            "center_world": [
+              35.39,
+              2.635,
+              30.67
+            ],
+            "bottom_center_world": [
+              35.39,
+              1.855,
+              30.67
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                36.028938594545416,
+                3.415,
+                31.11738962035382
+              ],
+              "inner_top_right": [
+                34.751061405454585,
+                3.415,
+                30.222610379646184
+              ],
+              "inner_bottom_right": [
+                34.751061405454585,
+                1.855,
+                30.222610379646184
+              ],
+              "inner_bottom_left": [
+                36.028938594545416,
+                1.855,
+                31.11738962035382
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 768.76,
+              "y_px": 229.9
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 1054.0,
+              "y_px": 220.48
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 1033.07,
+              "y_px": 483.28
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 693.21,
+              "y_px": 379.43
+            }
+          ]
+        },
+        {
+          "gate_id": 11,
+          "cvat_skel_order": 2,
+          "gate_world": {
+            "gate_id": 11,
+            "name": "Ворота 11",
+            "center_world": [
+              37.11,
+              0.78,
+              31.87
+            ],
+            "bottom_center_world": [
+              37.11,
+              0.0,
+              31.87
+            ],
+            "yaw_deg": 145.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                37.748938594545415,
+                1.56,
+                32.317389620353815
+              ],
+              "inner_top_right": [
+                36.471061405454584,
+                1.56,
+                31.422610379646184
+              ],
+              "inner_bottom_right": [
+                36.471061405454584,
+                0.0,
+                31.422610379646184
+              ],
+              "inner_bottom_left": [
+                37.748938594545415,
+                0.0,
+                32.317389620353815
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 509.82,
+              "y_px": 353.41
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 611.42,
+              "y_px": 395.81
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 481.74,
+              "y_px": 608.07
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 410.88,
+              "y_px": 489.67
+            }
+          ]
+        },
+        {
+          "gate_id": 9,
+          "cvat_skel_order": 3,
+          "gate_world": {
+            "gate_id": 9,
+            "name": "Ворота 9",
+            "center_world": [
+              38.83,
+              2.635,
+              33.08
+            ],
+            "bottom_center_world": [
+              38.83,
+              1.855,
+              33.08
+            ],
+            "yaw_deg": 325.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                38.19106140545458,
+                3.415,
+                32.63261037964618
+              ],
+              "inner_top_right": [
+                39.46893859454541,
+                3.415,
+                33.527389620353816
+              ],
+              "inner_bottom_right": [
+                39.46893859454541,
+                1.855,
+                33.527389620353816
+              ],
+              "inner_bottom_left": [
+                38.19106140545458,
+                1.855,
+                32.63261037964618
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 513.14,
+              "y_px": 239.01
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 570.36,
+              "y_px": 236.28
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 501.89,
+              "y_px": 321.64
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 453.96,
+              "y_px": 306.93
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 34.189217,
+          "y": 1.164501,
+          "z": 32.022137
+        },
+        "quaternion_world_body": {
+          "x": 0.31386107206344604,
+          "y": 0.8329843282699585,
+          "z": -0.04681916907429695,
+          "w": 0.4532508850097656
+        },
+        "yaw_deg": 128.86,
+        "timestamp_sec": 16.498111724853516,
+        "time_error_sec": 0.00467371940612793
+      }
+    },
+    {
+      "task": "multi_gate_cvat_session_001",
+      "purpose": "multi-gate reprojection calibration",
+      "image_filename": "frame_000646.jpg",
+      "frame_index": 646,
+      "annotations": [
+        {
+          "gate_id": 21,
+          "cvat_skel_order": 0,
+          "gate_world": {
+            "gate_id": 21,
+            "name": "Ворота 21",
+            "center_world": [
+              13.34,
+              2.635,
+              27.13
+            ],
+            "bottom_center_world": [
+              13.34,
+              1.855,
+              27.13
+            ],
+            "yaw_deg": 180.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                14.12,
+                3.415,
+                27.13
+              ],
+              "inner_top_right": [
+                12.56,
+                3.415,
+                27.13
+              ],
+              "inner_bottom_right": [
+                12.56,
+                1.855,
+                27.13
+              ],
+              "inner_bottom_left": [
+                14.12,
+                1.855,
+                27.13
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 644.39,
+              "y_px": 220.29
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 677.37,
+              "y_px": 256.15
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 643.35,
+              "y_px": 288.68
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 612.8,
+              "y_px": 256.59
+            }
+          ]
+        },
+        {
+          "gate_id": 17,
+          "cvat_skel_order": 1,
+          "gate_world": {
+            "gate_id": 17,
+            "name": "Ворота 17",
+            "center_world": [
+              10.34,
+              0.78,
+              34.01
+            ],
+            "bottom_center_world": [
+              10.34,
+              0.0,
+              34.01
+            ],
+            "yaw_deg": 180.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                11.12,
+                1.56,
+                34.01
+              ],
+              "inner_top_right": [
+                9.56,
+                1.56,
+                34.01
+              ],
+              "inner_bottom_right": [
+                9.56,
+                0.0,
+                34.01
+              ],
+              "inner_bottom_left": [
+                11.12,
+                0.0,
+                34.01
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 622.65,
+              "y_px": 404.21
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 701.6,
+              "y_px": 484.54
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 622.19,
+              "y_px": 538.24
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 551.61,
+              "y_px": 468.47
+            }
+          ]
+        },
+        {
+          "gate_id": 19,
+          "cvat_skel_order": 2,
+          "gate_world": {
+            "gate_id": 19,
+            "name": "Ворота 19",
+            "center_world": [
+              13.34,
+              0.78,
+              34.01
+            ],
+            "bottom_center_world": [
+              13.34,
+              0.0,
+              34.01
+            ],
+            "yaw_deg": 180.0,
+            "size_m": [
+              1.56,
+              1.56
+            ],
+            "corners_world": {
+              "inner_top_left": [
+                14.12,
+                1.56,
+                34.01
+              ],
+              "inner_top_right": [
+                12.56,
+                1.56,
+                34.01
+              ],
+              "inner_bottom_right": [
+                12.56,
+                0.0,
+                34.01
+              ],
+              "inner_bottom_left": [
+                14.12,
+                0.0,
+                34.01
+              ]
+            }
+          },
+          "keypoints": [
+            {
+              "name": "inner_top_left",
+              "x_px": 453.63,
+              "y_px": 233.46
+            },
+            {
+              "name": "inner_top_right",
+              "x_px": 540.54,
+              "y_px": 321.61
+            },
+            {
+              "name": "inner_bottom_right",
+              "x_px": 477.33,
+              "y_px": 395.49
+            },
+            {
+              "name": "inner_bottom_left",
+              "x_px": 397.13,
+              "y_px": 318.48
+            }
+          ]
+        }
+      ],
+      "ground_truth": {
+        "position_world": {
+          "x": 11.527299,
+          "y": 3.267129,
+          "z": 37.52132
+        },
+        "quaternion_world_body": {
+          "x": -0.3861331641674042,
+          "y": -0.776800274848938,
+          "z": 0.485464870929718,
+          "w": 0.10865714401006699
+        },
+        "yaw_deg": -132.89,
+        "timestamp_sec": 21.55845332145691,
+        "time_error_sec": 0.0016107559204101562
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "camera_matrix": [
+    [
+      296.6646703272939,
+      0.0,
+      633.02034515441
+    ],
+    [
+      0.0,
+      299.21194173330196,
+      365.78296841088974
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "dist_coeffs": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "image_size": [
+    1280,
+    720
+  ],
+  "reprojection_error_px": 0.936719,
+  "calibration_frames": [
+    "frame_000107_gate_0.jpg",
+    "frame_000111_gate_0.jpg",
+    "frame_000160_gate_2.jpg",
+    "frame_000164_gate_3.jpg",
+    "frame_000235_gate_4.jpg",
+    "frame_000289_gate_7.jpg",
+    "frame_000158.jpg"
+  ],
+  "n_point_correspondences": 32,
+  "notes": "Calibrated on Liftoff simulator data: all fov_frames plus ['frame_000158.jpg'] from multi_frames (2D–3D gate corners from calibration_frames_card.json). Distortion model: zero (simulator). Per-frame 3D centring applied for numerical stability."
+}

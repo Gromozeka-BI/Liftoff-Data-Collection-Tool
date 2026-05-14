@@ -1162,7 +1162,7 @@ class MainWindow(QMainWindow):
                     z = float(res.position_xyz[2])
                     prog = float(res.progress)
                     sigma = float(res.uncertainty_m)
-                    self._map.update_localizer_estimate(x, z)
+                    self._map.update_localizer_rc_estimate(x, z)
                     self._last_loc = (prog, sigma)
                     self._last_rc_sticks = list(sticks)
                     # Throttled log (≤1 Hz)

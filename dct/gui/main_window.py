@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         self._last_rc_loc: tuple[float, float, float, float] | None = None
         self._last_legacy_loc: tuple[float, float, float, float] | None = None
         self._last_kf_loc: tuple[float, float, float, float] | None = None
+        self._localizer_start_prior: tuple[np.ndarray, float] | None = None
         self._last_replay_path: str | None = None
         self._race_pip: VideoPiP | None = None
 
@@ -329,6 +330,7 @@ class MainWindow(QMainWindow):
         self._last_rc_loc = None
         self._last_legacy_loc = None
         self._last_kf_loc = None
+        self._localizer_start_prior = None
         self._map.clear_localizer_overlay()
         self._map.update_hud(self._latest_frame, None, has_gt=(self._latest_frame is not None))
 
@@ -369,6 +371,7 @@ class MainWindow(QMainWindow):
                 raise RuntimeError("Не удалось определить эталон по выбранному файлу")
             pos = _load_pos(pos_src)
             self._map.set_reference_path(pos[:, 0], pos[:, 2])
+            self._localizer_start_prior = self._track_start_prior()
 
             self._localizer = None
             self._localizer_rc = None
@@ -387,7 +390,7 @@ class MainWindow(QMainWindow):
             if p_bf_npz is not None and refbuild.npz_feature_kind(p_bf_npz) == FEATURE_BETAFLIGHT_CLASSIC_V1:
                 bf_path = p_bf_npz
                 self._localizer = OnlineLocalizer.from_file(bf_path, **_pf_extra)
-                self._localizer.reset()
+                self._reset_one_localizer(self._localizer)
 
             # Legacy (raw-sticks) localizer only makes sense when driven by LF telemetry.
             # Skip it for RC-only sessions — nothing would ever call update() on it.
@@ -395,10 +398,10 @@ class MainWindow(QMainWindow):
                 if p_leg_npz is not None:
                     if bf_path is None or p_leg_npz.resolve() != bf_path.resolve():
                         self._localizer_legacy = OnlineLocalizer.from_file(p_leg_npz, **_pf_extra)
-                        self._localizer_legacy.reset()
+                        self._reset_one_localizer(self._localizer_legacy)
                 elif p_bf_npz is not None and bf_path is None:
                     self._localizer_legacy = OnlineLocalizer.from_file(p_bf_npz, **_pf_extra)
-                    self._localizer_legacy.reset()
+                    self._reset_one_localizer(self._localizer_legacy)
 
             inv_lf0 = self._graphs.get_invert_state().get("lf", {})
             if ds != "rc" and any(inv_lf0.values()):
@@ -410,7 +413,7 @@ class MainWindow(QMainWindow):
                 )
             if ds == "both" and self._localizer is not None:
                 self._localizer_rc = OnlineLocalizer.from_file(bf_path, **_pf_extra)
-                self._localizer_rc.reset()
+                self._reset_one_localizer(self._localizer_rc)
                 _log.info(
                     "RC localizer (Betaflight): same .npz as Liftoff BF — blue dotted trail; "
                     "throttled INFO compares RC vs LF when legacy is off, else see loc_triple.",
@@ -471,6 +474,34 @@ class MainWindow(QMainWindow):
             self._localizer_rc = None
             self._localizer_legacy = None
 
+    def _track_start_prior(self) -> tuple[np.ndarray, float] | None:
+        if not self._current_track:
+            return None
+        sp = self._current_track.get("start_point")
+        if not isinstance(sp, dict) or "position" not in sp:
+            _log.warning("Localizer start prior skipped: track.json has no start_point.position")
+            return None
+        try:
+            xyz = np.asarray(sp["position"], dtype=float).reshape(3)
+            sigma = float(sp.get("radius", 2.0))
+        except Exception as exc:
+            _log.warning("Localizer start prior skipped: invalid start_point: %s", exc)
+            return None
+        if sigma <= 0:
+            sigma = 2.0
+        return xyz, sigma
+
+    def _reset_one_localizer(self, loc: OnlineLocalizer) -> None:
+        if self._localizer_start_prior is None:
+            loc.reset()
+            return
+        xyz, sigma = self._localizer_start_prior
+        loc.reset_to_start_point(xyz, sigma, wait_for_throttle=True)
+        _log.info(
+            "Localizer start prior: start_point xyz=(%.2f, %.2f, %.2f), sigma=%.2fm",
+            float(xyz[0]), float(xyz[1]), float(xyz[2]), sigma,
+        )
+
     def _reset_localizer(self) -> None:
         if (
             self._localizer is None
@@ -480,11 +511,11 @@ class MainWindow(QMainWindow):
             return
         try:
             if self._localizer is not None:
-                self._localizer.reset()
+                self._reset_one_localizer(self._localizer)
             if self._localizer_rc is not None:
-                self._localizer_rc.reset()
+                self._reset_one_localizer(self._localizer_rc)
             if self._localizer_legacy is not None:
-                self._localizer_legacy.reset()
+                self._reset_one_localizer(self._localizer_legacy)
         except Exception:
             pass
         self._prev_ts_wall = None
@@ -1192,12 +1223,17 @@ class MainWindow(QMainWindow):
 
                 # KF Layer 2 — применяем к результату RC-локализатора
                 if self._kf_layer2 is not None:
-                    dt_kf = (ts - self._prev_kf_ts_wall) if self._prev_kf_ts_wall is not None else None
-                    if dt_kf is not None and (dt_kf < 0 or dt_kf > 2.0):
-                        dt_kf = None
-                    self._prev_kf_ts_wall = ts
                     try:
-                        res_kf = self._kf_layer2.update(res, dt_kf)
+                        if loc.waiting_for_throttle_start:
+                            self._kf_layer2.reset()
+                            self._prev_kf_ts_wall = None
+                            res_kf = res
+                        else:
+                            dt_kf = (ts - self._prev_kf_ts_wall) if self._prev_kf_ts_wall is not None else None
+                            if dt_kf is not None and (dt_kf < 0 or dt_kf > 2.0):
+                                dt_kf = None
+                            self._prev_kf_ts_wall = ts
+                            res_kf = self._kf_layer2.update(res, dt_kf)
                         self._map.update_localizer_kf_estimate(
                             float(res_kf.position_xyz[0]),
                             float(res_kf.position_xyz[2]),

@@ -298,6 +298,16 @@ class ParticleFilter:
         )
         self._w = np.ones(self.N) / self.N
 
+    def reset_around_s(self, s_center: float, sigma_s: float) -> None:
+        """Сбросить фильтр вокруг известной стартовой позиции на дуге."""
+        sigma = max(float(sigma_s), 1e-3)
+        self._s = np.mod(self.rng.normal(float(s_center), sigma, self.N), self.ref.L)
+        self._v = np.clip(
+            self.rng.normal(self.v_init, self.v_init_std, self.N),
+            self.v_min, self.v_max,
+        )
+        self._w = np.ones(self.N) / self.N
+
     def update(self, stick_norm: np.ndarray, dt: float | None) -> tuple[float, float]:
         """Один шаг фильтра.
 
@@ -446,6 +456,15 @@ class OnlineLocalizer:
         self._pf = ParticleFilter(ref, **pf_kwargs)
         self._prev_sticks_buffer: list[np.ndarray] = []
         self._initialized = False
+        self._start_xyz: np.ndarray | None = None
+        self._start_s: float | None = None
+        self._start_sigma_m: float = 0.0
+        self._wait_for_throttle_start = False
+        self._throttle_baseline: float | None = None
+        self._throttle_start_delta = 0.03
+        self._throttle_start_frames = 2
+        self._throttle_start_count = 0
+        self._throttle_started_now = False
 
     # ------------------------------------------------------------------
     @classmethod
@@ -471,6 +490,44 @@ class OnlineLocalizer:
         self._pf.reset()
         self._prev_sticks_buffer = []
         self._initialized = True
+        self._clear_start_wait()
+
+    # ------------------------------------------------------------------
+    def reset_to_start_point(
+        self,
+        start_xyz: np.ndarray | tuple[float, float, float] | list[float],
+        sigma_start_m: float,
+        *,
+        wait_for_throttle: bool = True,
+        throttle_start_delta: float = 0.03,
+        throttle_start_frames: int = 2,
+    ) -> LocalizerResult:
+        """Сбросить фильтр в известную стартовую точку трассы.
+
+        ``start_xyz`` задаётся в системе координат ``Reference.pos``. Пока
+        ``wait_for_throttle`` включён, локализатор удерживает эту позицию и не
+        двигает PF до первого заметного движения throttle-стика.
+        """
+        xyz = np.asarray(start_xyz, dtype=float).reshape(3)
+        if sigma_start_m <= 0:
+            raise ValueError(f"sigma_start_m must be > 0, got {sigma_start_m}")
+
+        d2 = np.sum((self.ref.pos - xyz[None, :]) ** 2, axis=1)
+        idx = int(np.argmin(d2))
+        self._start_xyz = xyz
+        self._start_s = float(self.ref.s[idx])
+        self._start_sigma_m = float(sigma_start_m)
+        self._wait_for_throttle_start = bool(wait_for_throttle)
+        self._throttle_baseline = None
+        self._throttle_start_delta = float(throttle_start_delta)
+        self._throttle_start_frames = max(1, int(throttle_start_frames))
+        self._throttle_start_count = 0
+        self._throttle_started_now = False
+
+        self._pf.reset_around_s(self._start_s, self._start_sigma_m)
+        self._prev_sticks_buffer = []
+        self._initialized = True
+        return self._start_result()
 
     # ------------------------------------------------------------------
     def update(
@@ -504,6 +561,13 @@ class OnlineLocalizer:
             self.reset()
 
         sticks = np.asarray(sticks, dtype=float)
+        if self._wait_for_throttle_start:
+            self._update_throttle_start(float(sticks[0]))
+            if self._wait_for_throttle_start:
+                return self._start_result()
+            if self._throttle_started_now:
+                dt = None
+                self._throttle_started_now = False
 
         if self.ref.feature_kind == FEATURE_BETAFLIGHT_CLASSIC_V1:
             # Use current-session rate profile when provided so that the
@@ -539,6 +603,50 @@ class OnlineLocalizer:
             uncertainty_m=sigma,
             track_length=self.ref.L,
         )
+
+    # ------------------------------------------------------------------
+    def _clear_start_wait(self) -> None:
+        self._start_xyz = None
+        self._start_s = None
+        self._start_sigma_m = 0.0
+        self._wait_for_throttle_start = False
+        self._throttle_baseline = None
+        self._throttle_start_count = 0
+        self._throttle_started_now = False
+
+    def _update_throttle_start(self, throttle: float) -> None:
+        if self._throttle_baseline is None:
+            self._throttle_baseline = throttle
+            return
+        if abs(throttle - self._throttle_baseline) >= self._throttle_start_delta:
+            self._throttle_start_count += 1
+        else:
+            self._throttle_start_count = 0
+        if self._throttle_start_count >= self._throttle_start_frames:
+            self._wait_for_throttle_start = False
+            self._prev_sticks_buffer = []
+            self._throttle_started_now = True
+
+    def _start_result(self) -> LocalizerResult:
+        if self._start_xyz is None or self._start_s is None:
+            s_est, sigma = self._pf._estimate()
+            xyz = self.ref.pos_at_s(s_est)
+        else:
+            s_est = self._start_s
+            sigma = self._start_sigma_m
+            xyz = self._start_xyz.copy()
+        return LocalizerResult(
+            position_xyz=xyz,
+            s=s_est,
+            progress=s_est / self.ref.L,
+            uncertainty_m=sigma,
+            track_length=self.ref.L,
+        )
+
+    @property
+    def waiting_for_throttle_start(self) -> bool:
+        """True while a start-point prior is held until throttle moves."""
+        return self._wait_for_throttle_start
 
     # ------------------------------------------------------------------
     def inject_position_observation(

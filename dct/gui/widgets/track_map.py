@@ -146,13 +146,14 @@ class WorldTextItem(pg.GraphicsObject):
         p.restore()
 
 
-_LOC_LABELS: list[str] = ["GT", "LF", "RC", "Legacy", "KF"]
+_LOC_LABELS: list[str] = ["GT", "LF", "RC", "Legacy", "KF", "CamKF"]
 _LOC_COLORS: dict[str, str] = {
     "GT":     theme.DRONE,
     "LF":     theme.LOCALIZER,
     "RC":     theme.LOCALIZER_RC,
     "Legacy": theme.LOCALIZER_LEGACY,
     "KF":     theme.LOCALIZER_KF,
+    "CamKF":  theme.LOCALIZER_CAM,
 }
 
 
@@ -182,7 +183,9 @@ class MapHUDItem(QGraphicsObject):
         self._tele_lines: list[tuple[str, str, str]] = []
         self._loc_data: dict[str, tuple[float, float]] = {}   # label → (prog, sigma)
         self._has_gt: bool = False
-        self._marker_visible: dict[str, bool] = {k: True for k in _LOC_LABELS}
+        self._marker_visible: dict[str, bool] = {
+            "GT": True, "LF": True, "RC": True, "Legacy": True, "KF": True, "CamKF": False,
+        }
         self._race_mode: bool = False
         self._size_w = 220
         self._size_h = 120
@@ -234,12 +237,20 @@ class MapHUDItem(QGraphicsObject):
         self.prepareGeometryChange()
         self.update()
 
+    def set_marker_visible(self, marker: str, on: bool) -> None:
+        self._marker_visible[marker] = bool(on)
+        self.update()
+
     # ── QGraphicsItem ─────────────────────────────────────────────────────
 
     def boundingRect(self) -> QRectF:
         n_tele = len(self._tele_lines)
         n_gt   = 1 if self._has_gt else 0
-        n_loc  = sum(1 for k in _LOC_LABELS if k != "GT" and k in self._loc_data)
+        n_loc  = sum(
+            1
+            for k in _LOC_LABELS
+            if k != "GT" and (k in self._loc_data or k == "CamKF")
+        )
         rows   = max(1, n_tele + n_gt + n_loc)
         line_h = self.LINE_H + (4 if self._race_mode else 0)
         h = self.PADDING * 2 + self.HEAD_H + rows * line_h
@@ -347,10 +358,14 @@ class MapHUDItem(QGraphicsObject):
             for lbl in _LOC_LABELS:
                 if lbl == "GT":
                     continue
-                if lbl not in self._loc_data:
+                if lbl not in self._loc_data and lbl != "CamKF":
                     continue
-                prog, sigma = self._loc_data[lbl]
-                _draw_marker_row(lbl, f"{prog * 100:.0f}%  σ±{sigma:.1f} m")
+                if lbl in self._loc_data:
+                    prog, sigma = self._loc_data[lbl]
+                    value = f"{prog * 100:.0f}%  σ±{sigma:.1f} m"
+                else:
+                    value = "overlay"
+                _draw_marker_row(lbl, value)
 
             self._click_rows = click_rows
 
@@ -382,6 +397,8 @@ class MapHUDItem(QGraphicsObject):
 
 
 class TrackMapWidget(pg.PlotWidget):
+    marker_visibility_changed = pyqtSignal(str, bool)
+
     TRAIL_SECS = 3.0
     TRAIL_MAX  = 400
     LOC_TRAIL_MAX = 120
@@ -466,6 +483,21 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc4_arrow.setOpacity(0.0)
         self.addItem(self._loc4_arrow)
 
+        # Пятый локализатор: camera inject + KF Layer 2 — фиолетовый
+        self._loc5_trail_x: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc5_trail_z: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc5_trail_item = self.plot(
+            [], [], pen=pg.mkPen(theme.LOC_TRAIL_CAM, width=2.0),
+        )
+        self._loc5_trail_item.setZValue(9)
+        self._loc5_arrow = pg.ArrowItem(
+            angle=90, tipAngle=35, headLen=14, tailLen=10,
+            tailWidth=4, brush=pg.mkBrush(theme.LOCALIZER_CAM), pen=None,
+        )
+        self._loc5_arrow.setZValue(10)
+        self._loc5_arrow.setOpacity(0.0)
+        self.addItem(self._loc5_arrow)
+
         self._has_track = False
 
         self._show_ref_path = True
@@ -473,7 +505,7 @@ class TrackMapWidget(pg.PlotWidget):
         self._show_loc_trail = True
         # per-marker visibility (controlled via HUD checkboxes)
         self._marker_visible: dict[str, bool] = {
-            "GT": True, "LF": True, "RC": True, "Legacy": True, "KF": True,
+            "GT": True, "LF": True, "RC": True, "Legacy": True, "KF": True, "CamKF": False,
         }
 
         self._hud = MapHUDItem(self)
@@ -531,6 +563,10 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc4_trail_z.clear()
         self._loc4_trail_item.setData([], [])
         self._loc4_arrow.setOpacity(0.0)
+        self._loc5_trail_x.clear()
+        self._loc5_trail_z.clear()
+        self._loc5_trail_item.setData([], [])
+        self._loc5_arrow.setOpacity(0.0)
 
     def update_localizer_estimate(self, px: float, pz: float) -> None:
         """Оценка локализатора по стикам Liftoff (золотой трейл/стрелка)."""
@@ -604,6 +640,24 @@ class TrackMapWidget(pg.PlotWidget):
                 tang_deg = math.degrees(math.atan2(dz, dx))
                 self._loc4_arrow.setStyle(angle=90 - tang_deg)
 
+    def update_localizer_cam_estimate(self, px: float, pz: float) -> None:
+        """Оценка camera-fused контура (PF + camera inject + KF), фиолетовый."""
+        self._loc5_trail_x.append(px)
+        self._loc5_trail_z.append(pz)
+        visible = self._marker_visible.get("CamKF", False)
+        if self._show_loc_trail and visible:
+            self._loc5_trail_item.setData(list(self._loc5_trail_x), list(self._loc5_trail_z))
+        else:
+            self._loc5_trail_item.setData([], [])
+        self._loc5_arrow.setPos(px, pz)
+        self._loc5_arrow.setOpacity(1.0 if (self._show_loc_arrow and visible) else 0.0)
+        if len(self._loc5_trail_x) >= 2:
+            dx = self._loc5_trail_x[-1] - self._loc5_trail_x[-2]
+            dz = self._loc5_trail_z[-1] - self._loc5_trail_z[-2]
+            if dx * dx + dz * dz > 1e-8:
+                tang_deg = math.degrees(math.atan2(dz, dx))
+                self._loc5_arrow.setStyle(angle=90 - tang_deg)
+
     # ── visibility toggles ────────────────────────────────────────────────
 
     def set_reference_path_visible(self, on: bool) -> None:
@@ -622,6 +676,8 @@ class TrackMapWidget(pg.PlotWidget):
             1.0 if (on and mv.get("Legacy", True) and len(self._loc3_trail_x) > 0) else 0.0)
         self._loc4_arrow.setOpacity(
             1.0 if (on and mv.get("KF", True) and len(self._loc4_trail_x) > 0) else 0.0)
+        self._loc5_arrow.setOpacity(
+            1.0 if (on and mv.get("CamKF", False) and len(self._loc5_trail_x) > 0) else 0.0)
 
     def set_localizer_trail_visible(self, on: bool) -> None:
         self._show_loc_trail = bool(on)
@@ -631,6 +687,7 @@ class TrackMapWidget(pg.PlotWidget):
             self._loc2_trail_item.setData([], [])
             self._loc3_trail_item.setData([], [])
             self._loc4_trail_item.setData([], [])
+            self._loc5_trail_item.setData([], [])
         else:
             if mv.get("LF", True):
                 self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
@@ -640,10 +697,13 @@ class TrackMapWidget(pg.PlotWidget):
                 self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
             if mv.get("KF", True):
                 self._loc4_trail_item.setData(list(self._loc4_trail_x), list(self._loc4_trail_z))
+            if mv.get("CamKF", False):
+                self._loc5_trail_item.setData(list(self._loc5_trail_x), list(self._loc5_trail_z))
 
     def set_marker_visible(self, marker: str, on: bool) -> None:
         """Показать/скрыть конкретный маркер (GT / LF / RC / Legacy / KF)."""
         self._marker_visible[marker] = bool(on)
+        self._hud.set_marker_visible(marker, on)
         show       = bool(on) and self._show_loc_arrow
         trail_show = bool(on) and self._show_loc_trail
         if marker == "GT":
@@ -676,9 +736,16 @@ class TrackMapWidget(pg.PlotWidget):
                 (list(self._loc4_trail_x) if trail_show else []),
                 (list(self._loc4_trail_z) if trail_show else []),
             )
+        elif marker == "CamKF":
+            self._loc5_arrow.setOpacity(1.0 if (show and len(self._loc5_trail_x) > 0) else 0.0)
+            self._loc5_trail_item.setData(
+                (list(self._loc5_trail_x) if trail_show else []),
+                (list(self._loc5_trail_z) if trail_show else []),
+            )
 
     def _on_hud_marker_toggle(self, marker: str, on: bool) -> None:
         self.set_marker_visible(marker, on)
+        self.marker_visibility_changed.emit(marker, on)
 
     # ── HUD ───────────────────────────────────────────────────────────────
 

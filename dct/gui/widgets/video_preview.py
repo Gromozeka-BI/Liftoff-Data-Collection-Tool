@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import cv2
 
@@ -29,7 +31,26 @@ class VideoPreviewWidget(QLabel):
             f"border: 1px solid {theme.BORDER}; border-radius: 4px;"
         )
         self._is_rgb = False  # флаг: VideoReader шлёт RGB, ScreenRecorder — BGR
+        self._overlay_enabled = False
+        self._gate_overlay: list[dict[str, Any]] = []
         self._show_placeholder()
+
+    def set_gate_overlay_enabled(self, enabled: bool) -> None:
+        """Enable/disable drawing camera gate detections over the preview frame."""
+        self._overlay_enabled = bool(enabled)
+
+    def set_gate_overlay(self, detections: list[dict[str, Any]] | None) -> None:
+        """Set YOLO/PnP gate detections to draw on the next preview frames.
+
+        Expected detection fields are intentionally loose for the first Replay
+        integration step:
+
+        - `bbox_xyxy`: [x1, y1, x2, y2] in source image pixels;
+        - `keypoints`: [[x, y], ...] in source image pixels;
+        - `gate_id`: optional gate id or list of ids;
+        - `confidence`: optional 0..1 score.
+        """
+        self._gate_overlay = list(detections or [])
 
     def update_frame(self, frame: np.ndarray, is_rgb: bool = False) -> None:
         """Принимает numpy-кадр (BGR от ScreenRecorder или RGB от VideoReader)."""
@@ -50,6 +71,9 @@ class VideoPreviewWidget(QLabel):
             if not is_rgb:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+            if self._overlay_enabled and self._gate_overlay:
+                self._draw_gate_overlay(frame, scale)
+
             h, w = frame.shape[:2]
             data = np.ascontiguousarray(frame)
             qimg = QImage(data.data, w, h, w * 3, QImage.Format.Format_RGB888)
@@ -62,6 +86,52 @@ class VideoPreviewWidget(QLabel):
         """Сбросить в плейсхолдер (при переключении режима)."""
         self.clear()
         self._show_placeholder()
+
+    def _draw_gate_overlay(self, frame_rgb: np.ndarray, scale: float) -> None:
+        color = (197, 134, 192)  # RGB, theme.LOCALIZER_CAM
+        point_color = (255, 220, 255)
+        for det in self._gate_overlay:
+            bbox = det.get("bbox_xyxy")
+            if bbox is not None and len(bbox) == 4:
+                x1, y1, x2, y2 = [int(float(v) * scale) for v in bbox]
+                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), color, 2)
+
+            keypoints = det.get("keypoints")
+            if keypoints is not None:
+                pts = np.asarray(keypoints, dtype=float).reshape(-1, 2)
+                scaled = []
+                for x, y in pts:
+                    px, py = int(x * scale), int(y * scale)
+                    scaled.append((px, py))
+                    cv2.circle(frame_rgb, (px, py), 3, point_color, -1)
+                if len(scaled) >= 2:
+                    cv2.polylines(frame_rgb, [np.asarray(scaled, dtype=np.int32)], True, color, 1)
+
+            label = self._overlay_label(det)
+            if label and bbox is not None and len(bbox) == 4:
+                x1, y1 = int(float(bbox[0]) * scale), int(float(bbox[1]) * scale)
+                cv2.putText(
+                    frame_rgb,
+                    label,
+                    (x1, max(12, y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+    @staticmethod
+    def _overlay_label(det: dict[str, Any]) -> str:
+        parts = []
+        if det.get("gate_id") is not None:
+            parts.append(f"gate {det['gate_id']}")
+        if det.get("confidence") is not None:
+            try:
+                parts.append(f"{float(det['confidence']):.2f}")
+            except Exception:
+                pass
+        return " ".join(parts)
 
     def _show_placeholder(self) -> None:
         self.setText("[ Video Preview ]")

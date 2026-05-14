@@ -24,6 +24,9 @@ LOC_TRAIL_LEGACY = "#6A9955"
 # KF второго контура (RC → KF Layer 2) — красный
 LOCALIZER_KF  = "#E05555"
 LOC_TRAIL_KF  = "#993333"
+# Камерный контур PF + camera inject + KF — фиолетовый
+LOCALIZER_CAM = "#C586C0"
+LOC_TRAIL_CAM = "#7A4E8A"
 GATE    = "#CE9178"
 GATE_SF = "#4EC9B0"
 

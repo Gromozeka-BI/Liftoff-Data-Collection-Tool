@@ -35,6 +35,7 @@ from dct.gui.widgets.top_bar import MODE_RACE, MODE_RECORD, MODE_REPLAY, TopBar
 from dct.gui.widgets.track_map import TrackMapWidget
 from dct.gui.widgets.video_pip import VideoPiP
 from dct.gui.widgets.video_preview import VideoPreviewWidget
+from dct.camera_localization import CameraObservation, read_observations_jsonl
 from dct.localization import OnlineLocalizer
 from dct.localization import reference_builder as refbuild
 from dct.localization.kf_layer2 import KFLayer2
@@ -95,6 +96,9 @@ class MainWindow(QMainWindow):
         self._last_kf_loc: tuple[float, float, float, float] | None = None
         self._localizer_start_prior: tuple[np.ndarray, float] | None = None
         self._last_replay_path: str | None = None
+        self._camera_observations: list[CameraObservation] = []
+        self._camera_obs_ts: np.ndarray = np.array([], dtype=float)
+        self._camera_observations_path: Path | None = None
         self._race_pip: VideoPiP | None = None
 
         self._build_ui()
@@ -107,6 +111,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._replay_space)
 
         self._preview_frame_ready.connect(self._on_preview_frame_main)
+        self._map.marker_visibility_changed.connect(self._on_map_marker_visibility_changed)
         QTimer.singleShot(2000, lambda: self._start_preview(self._setup_page.current_video_source()))
 
     # ── UI ─────────────────────────────────────────────────────────────────
@@ -247,6 +252,9 @@ class MainWindow(QMainWindow):
                 self._try_init_localizer_for_replay(Path(self._last_replay_path))
 
         self._map.clear_trail()
+        self._video.set_gate_overlay(None)
+        if self._race_pip is not None:
+            self._race_pip.video.set_gate_overlay(None)
         self._graphs.clear()
         self._video.clear_frame()
         self._lap_count = 0
@@ -760,6 +768,75 @@ class MainWindow(QMainWindow):
         self._map.set_localizer_arrow_visible(s["arrow"])
         self._map.set_localizer_trail_visible(s["trail"])
 
+    def _on_map_marker_visibility_changed(self, marker: str, visible: bool) -> None:
+        if marker != "CamKF":
+            return
+        if (
+            visible
+            and self._mode == MODE_REPLAY
+            and self._last_replay_path
+            and len(self._camera_obs_ts) == 0
+        ):
+            self._load_camera_observations_for_replay(Path(self._last_replay_path))
+        self._video.set_gate_overlay_enabled(visible)
+        if self._race_pip is not None:
+            self._race_pip.video.set_gate_overlay_enabled(visible)
+        if visible and self._replay is not None:
+            self._update_camera_video_overlay(self._replay.current_ts)
+
+    def _load_camera_observations_for_replay(self, session_path: Path) -> None:
+        obs_path = session_path / "camera_observations.jsonl"
+        self._camera_observations_path = obs_path
+        try:
+            self._camera_observations = read_observations_jsonl(obs_path)
+        except Exception as exc:
+            _log.warning("Replay camera observations load failed: %s", exc)
+            self._camera_observations = []
+        self._camera_obs_ts = np.array(
+            [obs.timestamp for obs in self._camera_observations],
+            dtype=float,
+        )
+        self._video.set_gate_overlay(None)
+        if self._race_pip is not None:
+            self._race_pip.video.set_gate_overlay(None)
+        if self._camera_observations:
+            _log.info(
+                "Replay camera observations loaded: %d from %s",
+                len(self._camera_observations),
+                obs_path.name,
+            )
+        else:
+            _log.info("Replay camera observations unavailable: %s", obs_path)
+
+    def _camera_overlay_for_ts(self, ts_wall: float, max_age_s: float = 0.6) -> list[dict] | None:
+        if len(self._camera_obs_ts) == 0:
+            return None
+        insert_idx = int(np.searchsorted(self._camera_obs_ts, ts_wall))
+        candidates = []
+        if insert_idx < len(self._camera_observations):
+            candidates.append(insert_idx)
+        if insert_idx > 0:
+            candidates.append(insert_idx - 1)
+        if not candidates:
+            return None
+        idx = min(
+            candidates,
+            key=lambda i: abs(float(ts_wall) - self._camera_observations[i].timestamp),
+        )
+        if idx < 0 or idx >= len(self._camera_observations):
+            return None
+        obs = self._camera_observations[idx]
+        if abs(float(ts_wall) - obs.timestamp) > max_age_s:
+            return None
+        overlay = obs.to_overlay_dict()
+        return [overlay] if overlay is not None else None
+
+    def _update_camera_video_overlay(self, ts_wall: float) -> None:
+        overlay = self._camera_overlay_for_ts(ts_wall)
+        self._video.set_gate_overlay(overlay)
+        if self._race_pip is not None:
+            self._race_pip.video.set_gate_overlay(overlay)
+
     @pyqtSlot()
     def _on_replay_loc_settings_changed(self) -> None:
         """Re-initialize the localizer when the user changes settings in the Replay page."""
@@ -930,6 +1007,7 @@ class MainWindow(QMainWindow):
         # Use the unified helper so meta.json / folder name are also checked
         replay_track_id = self._session_track_id(p)
         self._replay_page.set_localizer_track(replay_track_id)
+        self._load_camera_observations_for_replay(p)
 
         if self._replay is not None:
             try:
@@ -1105,6 +1183,7 @@ class MainWindow(QMainWindow):
     def _on_telemetry(self, frame: dict) -> None:
         self._latest_frame = frame
         self._map.update_drone(frame)
+        self._update_camera_video_overlay(float(frame.get("ts_wall", 0.0)))
         if (
             self._mode in (MODE_RECORD, MODE_REPLAY)
             and self._record_ds_mode in ("liftoff", "both")
@@ -1330,6 +1409,10 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object)
     def _on_replay_video_frame(self, frame) -> None:
+        if self._replay is not None:
+            self._update_camera_video_overlay(self._replay.current_ts)
+        elif self._latest_frame is not None:
+            self._update_camera_video_overlay(float(self._latest_frame.get("ts_wall", 0.0)))
         self._video.update_frame(frame, is_rgb=True)
         if self._race_pip is not None:
             self._race_pip.update_frame(frame, is_rgb=True)

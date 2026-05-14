@@ -21,6 +21,9 @@ LOC_TRAIL_RC = "#3D6FA3"
 # Третий PF (legacy sticks, тот же круг что BF-эталон)
 LOCALIZER_LEGACY = "#B5CEA8"
 LOC_TRAIL_LEGACY = "#6A9955"
+# KF второго контура (RC → KF Layer 2) — красный
+LOCALIZER_KF  = "#E05555"
+LOC_TRAIL_KF  = "#993333"
 GATE    = "#CE9178"
 GATE_SF = "#4EC9B0"
 

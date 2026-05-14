@@ -37,6 +37,7 @@ from dct.gui.widgets.video_pip import VideoPiP
 from dct.gui.widgets.video_preview import VideoPreviewWidget
 from dct.localization import OnlineLocalizer
 from dct.localization import reference_builder as refbuild
+from dct.localization.kf_layer2 import KFLayer2
 from dct.rate_features import FEATURE_BETAFLIGHT_CLASSIC_V1
 from dct.session import load_meta
 from dct.video_preview_source import VideoPreviewSource
@@ -78,8 +79,10 @@ class MainWindow(QMainWindow):
         self._localizer: OnlineLocalizer | None = None
         self._localizer_rc: OnlineLocalizer | None = None
         self._localizer_legacy: OnlineLocalizer | None = None
+        self._kf_layer2: KFLayer2 | None = None
         self._prev_ts_wall: float | None = None
         self._prev_rc_ts_wall: float | None = None
+        self._prev_kf_ts_wall: float | None = None
         self._record_ds_mode: str = "liftoff"
         self._current_rate_profile: dict | None = None  # rate profile of current session
         self._last_loc: tuple[float, float] | None = None
@@ -89,6 +92,7 @@ class MainWindow(QMainWindow):
         self._last_lf_loc: tuple[float, float, float, float] | None = None  # x,z,prog,sig
         self._last_rc_loc: tuple[float, float, float, float] | None = None
         self._last_legacy_loc: tuple[float, float, float, float] | None = None
+        self._last_kf_loc: tuple[float, float, float, float] | None = None
         self._last_replay_path: str | None = None
         self._race_pip: VideoPiP | None = None
 
@@ -236,9 +240,10 @@ class MainWindow(QMainWindow):
             self._bottom.set_replay_mode()
             self._stop_preview()
             self._replay_page.reload_sessions()
-            # Keep localizer initialized (reference path visible on map);
-            # it will be re-initialized per session in _on_replay_session_selected.
             self._teardown_localizer()
+            # Re-init localizer immediately if a session was already selected.
+            if self._last_replay_path:
+                self._try_init_localizer_for_replay(Path(self._last_replay_path))
 
         self._map.clear_trail()
         self._graphs.clear()
@@ -311,8 +316,10 @@ class MainWindow(QMainWindow):
         self._localizer = None
         self._localizer_rc = None
         self._localizer_legacy = None
+        self._kf_layer2 = None
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
+        self._prev_kf_ts_wall = None
         self._current_rate_profile = None
         self._last_loc = None
         self._dual_loc_log_mono = 0.0
@@ -321,10 +328,12 @@ class MainWindow(QMainWindow):
         self._last_lf_loc = None
         self._last_rc_loc = None
         self._last_legacy_loc = None
+        self._last_kf_loc = None
         self._map.clear_localizer_overlay()
-        self._map.update_hud(self._latest_frame, None)
+        self._map.update_hud(self._latest_frame, None, has_gt=(self._latest_frame is not None))
 
     def _deactivate_localizer_full(self) -> None:
+
         self._teardown_localizer()
         self._map.clear_reference_path()
 
@@ -442,6 +451,18 @@ class MainWindow(QMainWindow):
                 _log.info(
                     "Only legacy-stick .npz in bundle — RC Betaflight localizer needs the BF file.",
                 )
+
+            # KF Layer 2: работает поверх RC-локализатора (режимы "rc" и "both")
+            rc_loc_for_kf = self._localizer_rc if ds == "both" else (
+                self._localizer if ds == "rc" else None
+            )
+            if rc_loc_for_kf is not None:
+                self._kf_layer2 = KFLayer2(rc_loc_for_kf.ref)
+                self._kf_layer2.reset()
+                _log.info("KF Layer 2 initialized (ds=%s)", ds)
+            else:
+                self._kf_layer2 = None
+
         except Exception as exc:
             _log.error("Localizer init failed: %s", exc)
             QMessageBox.warning(self, "Localizer", f"Не удалось загрузить эталон:\n{exc}")
@@ -468,19 +489,44 @@ class MainWindow(QMainWindow):
             pass
         self._prev_ts_wall = None
         self._prev_rc_ts_wall = None
+        self._prev_kf_ts_wall = None
         self._dual_loc_log_mono = 0.0
         self._last_lf_sticks = None
         self._last_rc_sticks = None
         self._last_lf_loc = None
         self._last_rc_loc = None
         self._last_legacy_loc = None
+        self._last_kf_loc = None
+        if self._kf_layer2 is not None:
+            self._kf_layer2.reset()
         self._map.clear_localizer_overlay()
         self._last_loc = None
-        self._map.update_hud(self._latest_frame, None)
+        self._map.update_hud(self._latest_frame, None, has_gt=(self._latest_frame is not None))
 
     def _reset_localizer_on_seek(self) -> None:
         """Reset particle filter state and clear map overlays after a replay seek."""
         self._reset_localizer()
+
+    def _build_locs_dict(self) -> dict[str, tuple[float, float]] | None:
+        """Собрать словарь активных оценок локализаторов для HUD.
+
+        Returns
+        -------
+        dict с ключами "LF", "RC", "Legacy", "KF" → (progress, sigma_m) или None.
+        """
+        locs: dict[str, tuple[float, float]] = {}
+        if self._last_lf_loc is not None:
+            locs["LF"] = (self._last_lf_loc[2], self._last_lf_loc[3])
+        if self._last_rc_loc is not None:
+            locs["RC"] = (self._last_rc_loc[2], self._last_rc_loc[3])
+        # rc-only mode: _localizer is the RC one, stored in _last_loc
+        if not locs.get("RC") and self._record_ds_mode == "rc" and self._last_loc is not None:
+            locs["RC"] = self._last_loc
+        if self._last_legacy_loc is not None:
+            locs["Legacy"] = (self._last_legacy_loc[2], self._last_legacy_loc[3])
+        if self._last_kf_loc is not None:
+            locs["KF"] = (self._last_kf_loc[2], self._last_kf_loc[3])
+        return locs if locs else None
 
     @staticmethod
     def _session_track_id(session_path: Path) -> str:
@@ -1087,7 +1133,7 @@ class MainWindow(QMainWindow):
                         self._log_localizer_compare(ts)
             except Exception as exc:
                 _log.warning("Localizer update failed: %s", exc)
-        self._map.update_hud(frame, self._last_loc)
+        self._map.update_hud(frame, self._build_locs_dict(), has_gt=(frame is not None))
 
     @pyqtSlot(list)
     def _on_rc_batch_localizer(self, frames: list) -> None:
@@ -1143,9 +1189,35 @@ class MainWindow(QMainWindow):
                         float(res.uncertainty_m),
                     )
                     self._log_localizer_compare(ts)
+
+                # KF Layer 2 — применяем к результату RC-локализатора
+                if self._kf_layer2 is not None:
+                    dt_kf = (ts - self._prev_kf_ts_wall) if self._prev_kf_ts_wall is not None else None
+                    if dt_kf is not None and (dt_kf < 0 or dt_kf > 2.0):
+                        dt_kf = None
+                    self._prev_kf_ts_wall = ts
+                    try:
+                        res_kf = self._kf_layer2.update(res, dt_kf)
+                        self._map.update_localizer_kf_estimate(
+                            float(res_kf.position_xyz[0]),
+                            float(res_kf.position_xyz[2]),
+                        )
+                        self._last_kf_loc = (
+                            float(res_kf.position_xyz[0]),
+                            float(res_kf.position_xyz[2]),
+                            float(res_kf.progress),
+                            float(res_kf.uncertainty_m),
+                        )
+                    except Exception as exc:
+                        _log.warning("KF Layer 2 update failed: %s", exc)
+
             except Exception as exc:
                 _log.warning("Localizer RC update failed: %s", exc)
-        self._map.update_hud(self._latest_frame, self._last_loc)
+        self._map.update_hud(
+            self._latest_frame,
+            self._build_locs_dict(),
+            has_gt=(self._latest_frame is not None),
+        )
 
     @pyqtSlot(dict)
     def _on_event(self, ev: dict) -> None:

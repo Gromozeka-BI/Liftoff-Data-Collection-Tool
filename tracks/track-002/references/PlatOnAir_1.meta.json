@@ -1,0 +1,12 @@
+{
+  "track_id": "track-002",
+  "profile": "PlatOnAir_1",
+  "built_at": "2026-05-14T07:41:35+00:00",
+  "source": "D:\\DroneTrackerDB\\Liftoff\\Part_10\\2026-05-10_pilot-PlatOnAir_drone-MadTrainer_track-track-002_session-027",
+  "lap_index": 5,
+  "smooth_w": 5,
+  "track_length_m": 281.0915038571545,
+  "frames": 1678,
+  "metrics": {},
+  "feature_kind": "betaflight_classic_rpy_deg_s_v1"
+}

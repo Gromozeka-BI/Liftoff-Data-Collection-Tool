@@ -21,8 +21,8 @@
   "ds_mode": "both",
   "com_port": "COM3",
   "video_source_index": 1,
-  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_10",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_5_Эксперементальный",
+  "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_0_Калибровка",
+  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_0_Калибровка",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
   "race": {
@@ -54,7 +54,7 @@
     }
   },
   "replay_localizer_enabled": true,
-  "last_mode": "replay",
+  "last_mode": "record",
   "localizer_obs_sigma": 2.0,
   "localizer_use_throttle": true,
   "localizer_ch_weights": [

@@ -21,11 +21,11 @@ from collections import deque
 from typing import Any
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QPointF, QRectF
+from PyQt6.QtCore import Qt, QPointF, QRectF, pyqtSignal
 from PyQt6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QTransform,
 )
-from PyQt6.QtWidgets import QGraphicsItem
+from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneMouseEvent
 
 from dct.gui import theme
 
@@ -146,28 +146,48 @@ class WorldTextItem(pg.GraphicsObject):
         p.restore()
 
 
-class MapHUDItem(QGraphicsItem):
+_LOC_LABELS: list[str] = ["GT", "LF", "RC", "Legacy", "KF"]
+_LOC_COLORS: dict[str, str] = {
+    "GT":     theme.DRONE,
+    "LF":     theme.LOCALIZER,
+    "RC":     theme.LOCALIZER_RC,
+    "Legacy": theme.LOCALIZER_LEGACY,
+    "KF":     theme.LOCALIZER_KF,
+}
+
+
+class MapHUDItem(QGraphicsObject):
     """Translucent HUD pinned to the top-right corner of the map's viewport.
 
-    Renders short telemetry lines (Spd / Alt / Bat / Pos) and the localizer
-    progress + uncertainty in screen-space pixels (does not zoom with the map).
+    Renders short telemetry lines (Spd / Alt / Bat / Pos) and per-localizer
+    rows (LF / RC / KF) with inline visibility checkboxes.
+    Clicking a localizer row toggles that marker on the map.
     """
 
-    PADDING = 10
-    LINE_H = 22
-    HEAD_H = 18
-    BG_ALPHA = 0.65
+    marker_visibility_changed = pyqtSignal(str, bool)
 
-    def __init__(self, plot_widget: "TrackMapWidget"):
+    PADDING  = 10
+    LINE_H   = 22
+    HEAD_H   = 18
+    BG_ALPHA = 0.65
+    CHK_SIZE = 10   # checkbox square side, px
+
+    def __init__(self, plot_widget: "TrackMapWidget") -> None:
         super().__init__()
         self._pw = plot_widget
         self.setZValue(50)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        self._lines: list[tuple[str, str, str]] = []
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+
+        self._tele_lines: list[tuple[str, str, str]] = []
+        self._loc_data: dict[str, tuple[float, float]] = {}   # label → (prog, sigma)
+        self._has_gt: bool = False
+        self._marker_visible: dict[str, bool] = {k: True for k in _LOC_LABELS}
         self._race_mode: bool = False
-        self._show_loc: bool = True
         self._size_w = 220
         self._size_h = 120
+        # click regions in local (screen-space) coords: (y_top, y_bottom, label)
+        self._click_rows: list[tuple[float, float, str]] = []
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -177,45 +197,58 @@ class MapHUDItem(QGraphicsItem):
             self.prepareGeometryChange()
             self.update()
 
-    def set_visible_loc(self, on: bool) -> None:
-        self._show_loc = on
-        self.update()
+    def set_data(
+        self,
+        frame: dict | None,
+        locs: dict[str, tuple[float, float]] | None,
+        has_gt: bool = False,
+    ) -> None:
+        """Update HUD content.
 
-    def set_data(self, frame: dict | None, loc: tuple[float, float] | None) -> None:
-        lines: list[tuple[str, str, str]] = []
+        Parameters
+        ----------
+        frame  : telemetry dict (keys vel_x/y/z, pos_y, bat_v, pos_x/z) or None
+        locs   : dict of active localizer results, e.g.
+                 {"LF": (progress, sigma_m), "RC": (...), "KF": (...), "Legacy": (...)}
+                 Only labels present in the dict are displayed.
+        has_gt : True when ground-truth drone telemetry is available (shows GT row).
+        """
+        tele: list[tuple[str, str, str]] = []
         if frame:
-            spd = (frame.get("vel_x", 0.0) ** 2 + frame.get("vel_y", 0.0) ** 2 + frame.get("vel_z", 0.0) ** 2) ** 0.5
-            lines.append(("Spd", f"{spd:.1f} m/s", theme.TEXT))
-            lines.append(("Alt", f"{frame.get('pos_y', 0.0):.1f} m", theme.TEXT))
-            lines.append(("Bat", f"{frame.get('bat_v', 0.0):.1f} V", theme.TEXT))
-            lines.append((
+            spd = (
+                frame.get("vel_x", 0.0) ** 2
+                + frame.get("vel_y", 0.0) ** 2
+                + frame.get("vel_z", 0.0) ** 2
+            ) ** 0.5
+            tele.append(("Spd", f"{spd:.1f} m/s",  theme.TEXT))
+            tele.append(("Alt", f"{frame.get('pos_y', 0.0):.1f} m", theme.TEXT))
+            tele.append(("Bat", f"{frame.get('bat_v', 0.0):.1f} V", theme.TEXT))
+            tele.append((
                 "Pos",
                 f"X{frame.get('pos_x', 0.0):.1f}  Z{frame.get('pos_z', 0.0):.1f}",
                 theme.DIM,
             ))
-        if self._show_loc and loc is not None:
-            progress, sigma = loc
-            lines.append((
-                "Loc",
-                f"{progress * 100:.0f}%  σ±{sigma:.1f} m",
-                theme.LOCALIZER,
-            ))
-        self._lines = lines
+        self._tele_lines = tele
+        self._loc_data   = dict(locs) if locs else {}
+        self._has_gt     = bool(has_gt)
         self.prepareGeometryChange()
         self.update()
 
     # ── QGraphicsItem ─────────────────────────────────────────────────────
 
     def boundingRect(self) -> QRectF:
-        rows = max(1, len(self._lines))
+        n_tele = len(self._tele_lines)
+        n_gt   = 1 if self._has_gt else 0
+        n_loc  = sum(1 for k in _LOC_LABELS if k != "GT" and k in self._loc_data)
+        rows   = max(1, n_tele + n_gt + n_loc)
         line_h = self.LINE_H + (4 if self._race_mode else 0)
         h = self.PADDING * 2 + self.HEAD_H + rows * line_h
-        w = 280 if self._race_mode else 220
+        w = 280 if self._race_mode else 240
         self._size_w, self._size_h = w, h
         return QRectF(-w, 0, w, h)
 
-    def paint(self, p: QPainter, *args) -> None:  # noqa: D401
-        if not self._lines:
+    def paint(self, p: QPainter, *args) -> None:
+        if not self._tele_lines and not self._loc_data:
             return
         try:
             rect = self.boundingRect()
@@ -227,6 +260,7 @@ class MapHUDItem(QGraphicsItem):
             p.setPen(QPen(QColor(theme.BORDER), 1))
             p.drawRoundedRect(rect, 6, 6)
 
+            # ── header ────────────────────────────────────────────────────
             font_head = QFont("Segoe UI")
             font_head.setBold(True)
             font_head.setPixelSize(
@@ -247,27 +281,93 @@ class MapHUDItem(QGraphicsItem):
             p.setFont(font)
 
             line_h = self.LINE_H + (4 if self._race_mode else 0)
-            for i, (label, value, color) in enumerate(self._lines):
+            lbl_w  = 56   # fixed label column width
+
+            # ── telemetry rows (no checkbox) ──────────────────────────────
+            for i, (label, value, color) in enumerate(self._tele_lines):
                 y = rect.y() + self.PADDING + self.HEAD_H + i * line_h
-                label_rect = QRectF(rect.x() + self.PADDING, y, 56, line_h)
-                value_rect = QRectF(
-                    rect.x() + self.PADDING + 56, y,
-                    rect.width() - self.PADDING * 2 - 56, line_h,
-                )
                 p.setPen(QColor(theme.DIM))
                 p.drawText(
-                    label_rect,
+                    QRectF(rect.x() + self.PADDING, y, lbl_w, line_h),
                     int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                     label,
                 )
                 p.setPen(QColor(color))
                 p.drawText(
-                    value_rect,
+                    QRectF(rect.x() + self.PADDING + lbl_w, y,
+                           rect.width() - self.PADDING * 2 - lbl_w, line_h),
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                     value,
                 )
-        except Exception:  # noqa: BLE001 — never let a paint error spam Qt's loop
+
+            # ── marker rows (GT + localizers) with checkboxes ─────────────
+            click_rows: list[tuple[float, float, str]] = []
+            base_i  = len(self._tele_lines)
+            row_idx = 0
+            chk     = self.CHK_SIZE
+
+            def _draw_marker_row(lbl: str, value_str: str) -> None:
+                nonlocal row_idx
+                i       = base_i + row_idx
+                row_idx += 1
+                y       = rect.y() + self.PADDING + self.HEAD_H + i * line_h
+                color   = _LOC_COLORS.get(lbl, theme.TEXT)
+                visible = self._marker_visible.get(lbl, True)
+
+                chk_x    = rect.x() + self.PADDING
+                chk_y    = y + (line_h - chk) / 2
+                chk_rect = QRectF(chk_x, chk_y, chk, chk)
+                p.setPen(QPen(QColor(color), 1.5))
+                p.setBrush(QBrush(QColor(color) if visible else QColor(theme.PANEL)))
+                p.drawRoundedRect(chk_rect, 2, 2)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+
+                label_x = rect.x() + self.PADDING + chk + 4
+                p.setPen(QColor(color if visible else theme.DIM))
+                p.drawText(
+                    QRectF(label_x, y, lbl_w, line_h),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    lbl,
+                )
+                if visible and value_str:
+                    p.setPen(QColor(color))
+                    p.drawText(
+                        QRectF(label_x + lbl_w, y,
+                               rect.width() - self.PADDING * 2 - chk - 4 - lbl_w, line_h),
+                        int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                        value_str,
+                    )
+                click_rows.append((y, y + line_h, lbl))
+
+            # GT row (no progress/sigma — just the checkbox)
+            if self._has_gt:
+                _draw_marker_row("GT", "")
+
+            # Localizer rows
+            for lbl in _LOC_LABELS:
+                if lbl == "GT":
+                    continue
+                if lbl not in self._loc_data:
+                    continue
+                prog, sigma = self._loc_data[lbl]
+                _draw_marker_row(lbl, f"{prog * 100:.0f}%  σ±{sigma:.1f} m")
+
+            self._click_rows = click_rows
+
+        except Exception:  # noqa: BLE001 — never let a paint error crash Qt's loop
             return
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        py = event.pos().y()
+        for (y0, y1, lbl) in self._click_rows:
+            if y0 <= py < y1:
+                new_state = not self._marker_visible.get(lbl, True)
+                self._marker_visible[lbl] = new_state
+                self.marker_visibility_changed.emit(lbl, new_state)
+                self.update()
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     # ── positioning helper ────────────────────────────────────────────────
 
@@ -351,16 +451,36 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc3_arrow.setOpacity(0.0)
         self.addItem(self._loc3_arrow)
 
+        # Четвёртый локализатор (RC → KF Layer 2) — красный, сплошная линия
+        self._loc4_trail_x: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc4_trail_z: deque[float] = deque(maxlen=self.LOC_TRAIL_MAX)
+        self._loc4_trail_item = self.plot(
+            [], [], pen=pg.mkPen(theme.LOC_TRAIL_KF, width=2.0),
+        )
+        self._loc4_trail_item.setZValue(7)
+        self._loc4_arrow = pg.ArrowItem(
+            angle=90, tipAngle=35, headLen=14, tailLen=10,
+            tailWidth=4, brush=pg.mkBrush(theme.LOCALIZER_KF), pen=None,
+        )
+        self._loc4_arrow.setZValue(8)
+        self._loc4_arrow.setOpacity(0.0)
+        self.addItem(self._loc4_arrow)
+
         self._has_track = False
 
         self._show_ref_path = True
         self._show_loc_arrow = True
         self._show_loc_trail = True
+        # per-marker visibility (controlled via HUD checkboxes)
+        self._marker_visible: dict[str, bool] = {
+            "GT": True, "LF": True, "RC": True, "Legacy": True, "KF": True,
+        }
 
         self._hud = MapHUDItem(self)
         self.scene().addItem(self._hud)
         self._hud.reposition()
         self._hud.set_data(None, None)
+        self._hud.marker_visibility_changed.connect(self._on_hud_marker_toggle)
 
     # ── setup ──────────────────────────────────────────────────────────────
 
@@ -407,17 +527,22 @@ class TrackMapWidget(pg.PlotWidget):
         self._loc3_trail_z.clear()
         self._loc3_trail_item.setData([], [])
         self._loc3_arrow.setOpacity(0.0)
+        self._loc4_trail_x.clear()
+        self._loc4_trail_z.clear()
+        self._loc4_trail_item.setData([], [])
+        self._loc4_arrow.setOpacity(0.0)
 
     def update_localizer_estimate(self, px: float, pz: float) -> None:
         """Оценка локализатора по стикам Liftoff (золотой трейл/стрелка)."""
         self._loc_trail_x.append(px)
         self._loc_trail_z.append(pz)
-        if self._show_loc_trail:
+        vis = self._marker_visible.get("LF", True)
+        if self._show_loc_trail and vis:
             self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
         else:
             self._loc_trail_item.setData([], [])
         self._loc_arrow.setPos(px, pz)
-        self._loc_arrow.setOpacity(1.0 if self._show_loc_arrow else 0.0)
+        self._loc_arrow.setOpacity(1.0 if (self._show_loc_arrow and vis) else 0.0)
         if len(self._loc_trail_x) >= 2:
             dx = self._loc_trail_x[-1] - self._loc_trail_x[-2]
             dz = self._loc_trail_z[-1] - self._loc_trail_z[-2]
@@ -429,12 +554,13 @@ class TrackMapWidget(pg.PlotWidget):
         """Оценка второго локализатора по каналам RC (синий трейл/стрелка)."""
         self._loc2_trail_x.append(px)
         self._loc2_trail_z.append(pz)
-        if self._show_loc_trail:
+        vis = self._marker_visible.get("RC", True)
+        if self._show_loc_trail and vis:
             self._loc2_trail_item.setData(list(self._loc2_trail_x), list(self._loc2_trail_z))
         else:
             self._loc2_trail_item.setData([], [])
         self._loc2_arrow.setPos(px, pz)
-        self._loc2_arrow.setOpacity(1.0 if self._show_loc_arrow else 0.0)
+        self._loc2_arrow.setOpacity(1.0 if (self._show_loc_arrow and vis) else 0.0)
         if len(self._loc2_trail_x) >= 2:
             dx = self._loc2_trail_x[-1] - self._loc2_trail_x[-2]
             dz = self._loc2_trail_z[-1] - self._loc2_trail_z[-2]
@@ -446,18 +572,37 @@ class TrackMapWidget(pg.PlotWidget):
         """Третья оценка PF: legacy-наблюдения (сырые стики), зелёный dash-dot."""
         self._loc3_trail_x.append(px)
         self._loc3_trail_z.append(pz)
-        if self._show_loc_trail:
+        vis = self._marker_visible.get("Legacy", True)
+        if self._show_loc_trail and vis:
             self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
         else:
             self._loc3_trail_item.setData([], [])
         self._loc3_arrow.setPos(px, pz)
-        self._loc3_arrow.setOpacity(1.0 if self._show_loc_arrow else 0.0)
+        self._loc3_arrow.setOpacity(1.0 if (self._show_loc_arrow and vis) else 0.0)
         if len(self._loc3_trail_x) >= 2:
             dx = self._loc3_trail_x[-1] - self._loc3_trail_x[-2]
             dz = self._loc3_trail_z[-1] - self._loc3_trail_z[-2]
             if dx * dx + dz * dz > 1e-8:
                 tang_deg = math.degrees(math.atan2(dz, dx))
                 self._loc3_arrow.setStyle(angle=90 - tang_deg)
+
+    def update_localizer_kf_estimate(self, px: float, pz: float) -> None:
+        """Оценка KF второго контура (RC → KF Layer 2), красный."""
+        self._loc4_trail_x.append(px)
+        self._loc4_trail_z.append(pz)
+        visible = self._marker_visible.get("KF", True)
+        if self._show_loc_trail and visible:
+            self._loc4_trail_item.setData(list(self._loc4_trail_x), list(self._loc4_trail_z))
+        else:
+            self._loc4_trail_item.setData([], [])
+        self._loc4_arrow.setPos(px, pz)
+        self._loc4_arrow.setOpacity(1.0 if (self._show_loc_arrow and visible) else 0.0)
+        if len(self._loc4_trail_x) >= 2:
+            dx = self._loc4_trail_x[-1] - self._loc4_trail_x[-2]
+            dz = self._loc4_trail_z[-1] - self._loc4_trail_z[-2]
+            if dx * dx + dz * dz > 1e-8:
+                tang_deg = math.degrees(math.atan2(dz, dx))
+                self._loc4_arrow.setStyle(angle=90 - tang_deg)
 
     # ── visibility toggles ────────────────────────────────────────────────
 
@@ -468,25 +613,82 @@ class TrackMapWidget(pg.PlotWidget):
 
     def set_localizer_arrow_visible(self, on: bool) -> None:
         self._show_loc_arrow = bool(on)
-        self._loc_arrow.setOpacity(1.0 if (on and len(self._loc_trail_x) > 0) else 0.0)
-        self._loc2_arrow.setOpacity(1.0 if (on and len(self._loc2_trail_x) > 0) else 0.0)
-        self._loc3_arrow.setOpacity(1.0 if (on and len(self._loc3_trail_x) > 0) else 0.0)
+        mv = self._marker_visible
+        self._loc_arrow.setOpacity(
+            1.0 if (on and mv.get("LF", True) and len(self._loc_trail_x) > 0) else 0.0)
+        self._loc2_arrow.setOpacity(
+            1.0 if (on and mv.get("RC", True) and len(self._loc2_trail_x) > 0) else 0.0)
+        self._loc3_arrow.setOpacity(
+            1.0 if (on and mv.get("Legacy", True) and len(self._loc3_trail_x) > 0) else 0.0)
+        self._loc4_arrow.setOpacity(
+            1.0 if (on and mv.get("KF", True) and len(self._loc4_trail_x) > 0) else 0.0)
 
     def set_localizer_trail_visible(self, on: bool) -> None:
         self._show_loc_trail = bool(on)
+        mv = self._marker_visible
         if not on:
             self._loc_trail_item.setData([], [])
             self._loc2_trail_item.setData([], [])
             self._loc3_trail_item.setData([], [])
+            self._loc4_trail_item.setData([], [])
         else:
-            self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
-            self._loc2_trail_item.setData(list(self._loc2_trail_x), list(self._loc2_trail_z))
-            self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
+            if mv.get("LF", True):
+                self._loc_trail_item.setData(list(self._loc_trail_x), list(self._loc_trail_z))
+            if mv.get("RC", True):
+                self._loc2_trail_item.setData(list(self._loc2_trail_x), list(self._loc2_trail_z))
+            if mv.get("Legacy", True):
+                self._loc3_trail_item.setData(list(self._loc3_trail_x), list(self._loc3_trail_z))
+            if mv.get("KF", True):
+                self._loc4_trail_item.setData(list(self._loc4_trail_x), list(self._loc4_trail_z))
+
+    def set_marker_visible(self, marker: str, on: bool) -> None:
+        """Показать/скрыть конкретный маркер (GT / LF / RC / Legacy / KF)."""
+        self._marker_visible[marker] = bool(on)
+        show       = bool(on) and self._show_loc_arrow
+        trail_show = bool(on) and self._show_loc_trail
+        if marker == "GT":
+            self._arrow.setOpacity(1.0 if (bool(on) and len(self._trail_x) > 0) else 0.0)
+            self._trail_item.setData(
+                (list(self._trail_x) if bool(on) else []),
+                (list(self._trail_z) if bool(on) else []),
+            )
+        elif marker == "LF":
+            self._loc_arrow.setOpacity(1.0 if (show and len(self._loc_trail_x) > 0) else 0.0)
+            self._loc_trail_item.setData(
+                (list(self._loc_trail_x) if trail_show else []),
+                (list(self._loc_trail_z) if trail_show else []),
+            )
+        elif marker == "RC":
+            self._loc2_arrow.setOpacity(1.0 if (show and len(self._loc2_trail_x) > 0) else 0.0)
+            self._loc2_trail_item.setData(
+                (list(self._loc2_trail_x) if trail_show else []),
+                (list(self._loc2_trail_z) if trail_show else []),
+            )
+        elif marker == "Legacy":
+            self._loc3_arrow.setOpacity(1.0 if (show and len(self._loc3_trail_x) > 0) else 0.0)
+            self._loc3_trail_item.setData(
+                (list(self._loc3_trail_x) if trail_show else []),
+                (list(self._loc3_trail_z) if trail_show else []),
+            )
+        elif marker == "KF":
+            self._loc4_arrow.setOpacity(1.0 if (show and len(self._loc4_trail_x) > 0) else 0.0)
+            self._loc4_trail_item.setData(
+                (list(self._loc4_trail_x) if trail_show else []),
+                (list(self._loc4_trail_z) if trail_show else []),
+            )
+
+    def _on_hud_marker_toggle(self, marker: str, on: bool) -> None:
+        self.set_marker_visible(marker, on)
 
     # ── HUD ───────────────────────────────────────────────────────────────
 
-    def update_hud(self, frame: dict | None, loc: tuple[float, float] | None) -> None:
-        self._hud.set_data(frame, loc)
+    def update_hud(
+        self,
+        frame: dict | None,
+        locs: dict[str, tuple[float, float]] | None,
+        has_gt: bool = False,
+    ) -> None:
+        self._hud.set_data(frame, locs, has_gt=has_gt)
         self._hud.reposition()
 
     def set_hud_visible(self, on: bool) -> None:
@@ -654,11 +856,16 @@ class TrackMapWidget(pg.PlotWidget):
             self._trail_x.popleft()
             self._trail_z.popleft()
             self._trail_ts.popleft()
-        self._trail_item.setData(list(self._trail_x), list(self._trail_z))
+        gt_vis = self._marker_visible.get("GT", True)
+        if gt_vis:
+            self._trail_item.setData(list(self._trail_x), list(self._trail_z))
+        else:
+            self._trail_item.setData([], [])
         yaw_deg = self._quat_yaw(
             frame["att_x"], frame["att_y"], frame["att_z"], frame["att_w"],
         )
         self._arrow.setPos(px, pz)
+        self._arrow.setOpacity(1.0 if gt_vis else 0.0)
         self._arrow.setStyle(angle=90 - yaw_deg)
 
     def clear_trail(self) -> None:

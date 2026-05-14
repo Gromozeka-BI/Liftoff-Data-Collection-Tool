@@ -32,7 +32,7 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAAAAAAA////+AAAB38AAAQPAAABJQAAASIAAAVcAAAEDgAAAAACAAAAB4AAAAAAAAAAFwAAB38AAAQP",
+    "geometry": "AdnQywADAAAAAAABAAAAAAAABEYAAAQOAAAAAQAAAB8AAARGAAAEDgAAAAAAAAAAB4AAAAABAAAAHwAABEYAAAQO",
     "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
     "split_content": "AAAA/wAAAAEAAAACAAACiAAAAbAAAAAAAwEAAAABAA==",
     "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAACAA==",
@@ -66,7 +66,7 @@
   "mavlink": {
     "enabled": true,
     "host": "127.0.0.1",
-    "port": 14551,
+    "port": 14550,
     "system_id": 1,
     "component_id": 1,
     "anchors": {

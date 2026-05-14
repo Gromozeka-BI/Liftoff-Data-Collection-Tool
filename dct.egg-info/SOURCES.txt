@@ -5,6 +5,8 @@ dct/align.py
 dct/cli.py
 dct/config.py
 dct/log.py
+dct/mavlink_geo.py
+dct/mavlink_sender.py
 dct/rate_features.py
 dct/rc_receiver.py
 dct/replay.py
@@ -21,6 +23,23 @@ dct.egg-info/dependency_links.txt
 dct.egg-info/entry_points.txt
 dct.egg-info/requires.txt
 dct.egg-info/top_level.txt
+dct/camera_localization/__init__.py
+dct/camera_localization/observation.py
+dct/camera_localization/calibration_tools/__init__.py
+dct/camera_localization/calibration_tools/calibrate_camera.py
+dct/camera_localization/experimental/__init__.py
+dct/camera_localization/experimental/pnp_solver_2/__init__.py
+dct/camera_localization/experimental/pnp_solver_2/pnp_solver_2.py
+dct/camera_localization/gate_localization/__init__.py
+dct/camera_localization/gate_localization/coarse_refine.py
+dct/camera_localization/gate_localization/global_search.py
+dct/camera_localization/gate_localization/topk_hypotheses.py
+dct/camera_localization/gate_model/__init__.py
+dct/camera_localization/gate_model/gate_model.py
+dct/camera_localization/pnp_solver/__init__.py
+dct/camera_localization/pnp_solver/pnp_solver.py
+dct/camera_localization/yolo_gate_adapter/__init__.py
+dct/camera_localization/yolo_gate_adapter/adapter.py
 dct/commands/__init__.py
 dct/commands/align_cmd.py
 dct/commands/inspect.py
@@ -52,6 +71,7 @@ dct/gui/widgets/track_map.py
 dct/gui/widgets/video_pip.py
 dct/gui/widgets/video_preview.py
 dct/localization/__init__.py
+dct/localization/kf_layer2.py
 dct/localization/lap_loader.py
 dct/localization/online_localizer.py
 dct/localization/reference_builder.py
@@ -62,3 +82,4 @@ dct/receivers/liftoff_udp.py
 dct/storage/__init__.py
 dct/storage/schema.py
 dct/storage/writer.py
+tests/test_mavlink_geo.py

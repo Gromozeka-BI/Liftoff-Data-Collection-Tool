@@ -38,11 +38,17 @@ class MavlinkUdpSender:
         if not force and now - self._last_heartbeat_mono < 1.0:
             return
         mavlink = self._mavutil.mavlink
+        base_mode = (
+            mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+            | mavlink.MAV_MODE_FLAG_GUIDED_ENABLED
+            | mavlink.MAV_MODE_FLAG_STABILIZE_ENABLED
+            | mavlink.MAV_MODE_FLAG_SAFETY_ARMED
+        )
         self._conn.mav.heartbeat_send(
-            mavlink.MAV_TYPE_GCS,
-            mavlink.MAV_AUTOPILOT_INVALID,
-            0,
-            0,
+            mavlink.MAV_TYPE_QUADROTOR,
+            mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
+            base_mode,
+            4,  # ArduCopter GUIDED custom mode.
             mavlink.MAV_STATE_ACTIVE,
         )
         self._last_heartbeat_mono = now

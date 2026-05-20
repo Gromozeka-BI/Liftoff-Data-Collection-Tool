@@ -19,14 +19,19 @@ class Sidebar(QFrame):
     page_changed      = pyqtSignal(int)
     collapsed_changed = pyqtSignal(bool)
 
-    DEFAULT_WIDTH = 160
+    DEFAULT_WIDTH = 262
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        width: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("sidebar_root")
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setMinimumWidth(0)
-        self.setMaximumWidth(280)
+        self._fixed_width = int(width) if width is not None else self.DEFAULT_WIDTH
+        self.setFixedWidth(self._fixed_width)
         self._collapsed = False
 
         root = QVBoxLayout(self)
@@ -36,7 +41,13 @@ class Sidebar(QFrame):
         self._stack = QStackedWidget()
         root.addWidget(self._stack, stretch=1)
 
-        self.resize(self.DEFAULT_WIDTH, self.height())
+    @property
+    def fixed_width(self) -> int:
+        return self._fixed_width
+
+    def set_fixed_width_px(self, width: int) -> None:
+        self._fixed_width = int(width)
+        self.setFixedWidth(self._fixed_width)
 
     # ── public API ─────────────────────────────────────────────────────────
 

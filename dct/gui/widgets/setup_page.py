@@ -16,12 +16,18 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGroupBox,
-    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QScrollArea, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from dct.gui import theme, ui_settings
+from dct.gui.widgets.mavlink_panel import (
+    build_mavlink_panel,
+    finalize_mavlink_panel,
+    mavlink_panel_min_width,
+    read_mavlink_settings,
+)
 from dct.localization import reference_builder as refbuild
 from dct.rc_receiver import scan_serial_ports
 from dct.screen_recorder import scan_video_devices
@@ -33,8 +39,13 @@ _SRC_LIFTOFF = "liftoff"
 _SRC_RC      = "rc"
 _SRC_BOTH    = "both"
 
-_MAV_SRC_CAMKF = "camkf"
-_MAV_SRC_KF = "kf"
+# Space for vertical scrollbar so content does not sit under the bar.
+_SCROLLBAR_GUTTER = 20
+_SCROLL_BOTTOM_PAD = 24
+_SCROLL_TAIL_SPACER = 20
+_SIDEBAR_WIDTH_DIVISOR = 1.5
+_SESSION_LABEL_W = 58
+_FORM_MIN_WIDTH = 240
 
 
 def _scan_dir(subdir: str) -> list[dict]:
@@ -65,6 +76,7 @@ class SetupPage(QWidget):
     video_source_changed     = pyqtSignal(dict)
     localizer_settings_changed = pyqtSignal()
     mavlink_settings_changed = pyqtSignal()
+    layout_changed           = pyqtSignal()
 
     _video_devices_ready = pyqtSignal(list)
     _com_ports_ready     = pyqtSignal(list)
@@ -77,9 +89,24 @@ class SetupPage(QWidget):
         self._saved_video_index: Any = None
         self._invert_lf: dict = {}
 
-        root = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(False)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+
+        content = QWidget()
+        content.setObjectName("setup_form_content")
+        content.setStyleSheet("QComboBox { min-width: 0px; }")
+        content.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Minimum,
+        )
+        root = QVBoxLayout(content)
         root.setSpacing(8)
-        root.setContentsMargins(8, 8, 8, 8)
+        root.setContentsMargins(8, 8, 8, 12)
 
         # ── Session config ─────────────────────────────────────────────────
         cfg_box = QGroupBox("Session config")
@@ -107,7 +134,7 @@ class SetupPage(QWidget):
         rc_row = QHBoxLayout()
         rc_row.setSpacing(4)
         self._combo_com = QComboBox()
-        self._combo_com.setMinimumWidth(110)
+        self._combo_com.setMinimumWidth(0)
         self._combo_com.setToolTip("COM-порт RC-приёмника")
         self._btn_refresh_com = QPushButton("↻")
         self._btn_refresh_com.setProperty("role", "icon")
@@ -118,7 +145,10 @@ class SetupPage(QWidget):
         self._lbl_rc_status.setStyleSheet(
             f"color: {theme.WARN}; font-size: {theme.FONT_HEAD}px;",
         )
-        rc_row.addWidget(self._combo_com, stretch=1)
+        self._combo_com.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
+        )
+        rc_row.addWidget(self._combo_com)
         rc_row.addWidget(self._btn_refresh_com)
         rc_row.addWidget(self._lbl_rc_status)
         ds_lay.addLayout(rc_row)
@@ -132,14 +162,17 @@ class SetupPage(QWidget):
         vrow = QHBoxLayout()
         vrow.setSpacing(4)
         self._combo_source = QComboBox()
-        self._combo_source.setMinimumWidth(110)
+        self._combo_source.setMinimumWidth(0)
         self._btn_refresh_src = QPushButton("↻")
         self._btn_refresh_src.setProperty("role", "icon")
         self._btn_refresh_src.setFixedWidth(28)
         self._btn_refresh_src.setToolTip("Обновить список устройств захвата")
         self._btn_refresh_src.clicked.connect(self._refresh_video_sources)
         self._combo_source.currentIndexChanged.connect(self._on_video_source_changed)
-        vrow.addWidget(self._combo_source, stretch=1)
+        self._combo_source.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
+        )
+        vrow.addWidget(self._combo_source)
         vrow.addWidget(self._btn_refresh_src)
         vid_lay.addLayout(vrow)
 
@@ -151,14 +184,14 @@ class SetupPage(QWidget):
         self._lbl_sessions_dir.setProperty("role", "dim")
         self._lbl_sessions_dir.setToolTip("Папка для сохранения сессий")
         self._lbl_sessions_dir.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred,
         )
         self._btn_browse_dir = QPushButton("📁")
         self._btn_browse_dir.setProperty("role", "icon")
         self._btn_browse_dir.setFixedWidth(28)
         self._btn_browse_dir.setToolTip("Выбрать папку сессий")
         self._btn_browse_dir.clicked.connect(self._browse_sessions_dir)
-        save_row.addWidget(self._lbl_sessions_dir, stretch=1)
+        save_row.addWidget(self._lbl_sessions_dir)
         save_row.addWidget(self._btn_browse_dir)
         vid_lay.addLayout(save_row)
         root.addWidget(vid_box)
@@ -180,9 +213,12 @@ class SetupPage(QWidget):
         prof_row.setSpacing(4)
         prof_row.addWidget(QLabel("Profile"))
         self._combo_loc_profile = QComboBox()
-        self._combo_loc_profile.setMinimumWidth(110)
+        self._combo_loc_profile.setMinimumWidth(0)
         self._combo_loc_profile.currentIndexChanged.connect(self._on_loc_profile_changed)
-        prof_row.addWidget(self._combo_loc_profile, stretch=1)
+        self._combo_loc_profile.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed,
+        )
+        prof_row.addWidget(self._combo_loc_profile)
         self._btn_loc_build = QPushButton("Build…")
         self._btn_loc_build.setToolTip("Собрать новый эталон из сессии или папки сессий")
         self._btn_loc_build.clicked.connect(self._on_build_clicked)
@@ -216,97 +252,28 @@ class SetupPage(QWidget):
         root.addWidget(loc_box)
 
         # ── MAVLink telemetry (Record) ────────────────────────────────────
-        mav_box = QGroupBox("Mavlink")
-        mav_lay = QVBoxLayout(mav_box)
-        mav_lay.setSpacing(4)
-        mav_settings = ui_settings.load().get("mavlink", {})
+        self._mavlink = build_mavlink_panel(
+            ui_settings.load().get("mavlink", {}),
+            bounds_default="Bounds: no track selected",
+            on_changed=self._on_mavlink_changed,
+        )
+        root.addWidget(self._mavlink.box, 0, Qt.AlignmentFlag.AlignTop)
 
-        source_row = QHBoxLayout()
-        source_row.setSpacing(4)
-        source_row.addWidget(QLabel("Source"))
-        self._combo_mavlink_source = QComboBox()
-        self._combo_mavlink_source.addItem("CamKF", userData=_MAV_SRC_CAMKF)
-        self._combo_mavlink_source.addItem("KF", userData=_MAV_SRC_KF)
-        saved_source = str(mav_settings.get("source", _MAV_SRC_CAMKF))
-        idx = self._combo_mavlink_source.findData(saved_source)
-        if idx >= 0:
-            self._combo_mavlink_source.setCurrentIndex(idx)
-        self._combo_mavlink_source.currentIndexChanged.connect(self._on_mavlink_changed)
-        source_row.addWidget(self._combo_mavlink_source, stretch=1)
-        mav_lay.addLayout(source_row)
+        self._scroll_tail = QWidget()
+        self._scroll_tail.setFixedHeight(_SCROLL_TAIL_SPACER)
+        self._scroll_tail.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        root.addWidget(self._scroll_tail)
 
-        self._chk_mavlink_enabled = QCheckBox("Enable UDP telemetry")
-        self._chk_mavlink_enabled.setChecked(bool(mav_settings.get("enabled", False)))
-        self._chk_mavlink_enabled.stateChanged.connect(self._on_mavlink_changed)
-        mav_lay.addWidget(self._chk_mavlink_enabled)
-
-        endpoint_row = QHBoxLayout()
-        endpoint_row.setSpacing(4)
-        endpoint_row.addWidget(QLabel("Host"))
-        self._txt_mavlink_host = QLineEdit(str(mav_settings.get("host", "127.0.0.1")))
-        self._txt_mavlink_host.editingFinished.connect(self._on_mavlink_changed)
-        endpoint_row.addWidget(self._txt_mavlink_host, stretch=1)
-        endpoint_row.addWidget(QLabel("Port"))
-        self._spn_mavlink_port = QSpinBox()
-        self._spn_mavlink_port.setRange(1, 65535)
-        self._spn_mavlink_port.setValue(int(mav_settings.get("port", 14550)))
-        self._spn_mavlink_port.valueChanged.connect(self._on_mavlink_changed)
-        endpoint_row.addWidget(self._spn_mavlink_port)
-        mav_lay.addLayout(endpoint_row)
-
-        ids_row = QHBoxLayout()
-        ids_row.setSpacing(4)
-        ids_row.addWidget(QLabel("Sys"))
-        self._spn_mavlink_sysid = QSpinBox()
-        self._spn_mavlink_sysid.setRange(1, 255)
-        self._spn_mavlink_sysid.setValue(int(mav_settings.get("system_id", 1)))
-        self._spn_mavlink_sysid.valueChanged.connect(self._on_mavlink_changed)
-        ids_row.addWidget(self._spn_mavlink_sysid)
-        ids_row.addWidget(QLabel("Comp"))
-        self._spn_mavlink_compid = QSpinBox()
-        self._spn_mavlink_compid.setRange(1, 255)
-        self._spn_mavlink_compid.setValue(int(mav_settings.get("component_id", 1)))
-        self._spn_mavlink_compid.valueChanged.connect(self._on_mavlink_changed)
-        ids_row.addWidget(self._spn_mavlink_compid)
-        ids_row.addStretch()
-        mav_lay.addLayout(ids_row)
-
-        anchors = mav_settings.get("anchors", {})
-        self._spn_mavlink_anchors: dict[str, dict[str, QDoubleSpinBox]] = {}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(2)
-        for col, title in enumerate(["Point", "Lat", "Lon", "Alt"]):
-            grid.addWidget(QLabel(title), 0, col)
-        for row, (key, title) in enumerate([("origin", "0.0"), ("x", "X.0"), ("z", "0.Z")], start=1):
-            grid.addWidget(QLabel(title), row, 0)
-            saved = anchors.get(key, {}) if isinstance(anchors, dict) else {}
-            self._spn_mavlink_anchors[key] = {}
-            for col, (field, decimals, default, min_val, max_val) in enumerate(
-                [
-                    ("lat", 7, 0.0, -90.0, 90.0),
-                    ("lon", 7, 0.0, -180.0, 180.0),
-                    ("alt", 2, 0.0, -1000.0, 10000.0),
-                ],
-                start=1,
-            ):
-                spn = QDoubleSpinBox()
-                spn.setRange(min_val, max_val)
-                spn.setDecimals(decimals)
-                spn.setSingleStep(0.000001 if field != "alt" else 0.5)
-                spn.setValue(float(saved.get(field, default)))
-                spn.valueChanged.connect(self._on_mavlink_changed)
-                grid.addWidget(spn, row, col)
-                self._spn_mavlink_anchors[key][field] = spn
-        mav_lay.addLayout(grid)
-
-        self._lbl_mavlink_bounds = QLabel("Bounds: no track selected")
-        self._lbl_mavlink_bounds.setProperty("role", "dim")
-        self._lbl_mavlink_bounds.setWordWrap(True)
-        mav_lay.addWidget(self._lbl_mavlink_bounds)
-        root.addWidget(mav_box)
-
-        root.addStretch(1)
+        self._scroll = scroll
+        self._form_content = content
+        self._form_width = _FORM_MIN_WIDTH
+        scroll.setWidget(content)
+        page_lay = QVBoxLayout(self)
+        page_lay.setContentsMargins(0, 0, 0, 0)
+        page_lay.addWidget(scroll)
 
         # ── Connections ────────────────────────────────────────────────────
         self._video_devices_ready.connect(self._apply_video_devices)
@@ -328,9 +295,24 @@ class SetupPage(QWidget):
         )
         self.reload_profiles()
         self._on_ds_mode_changed()
+        QTimer.singleShot(0, self._refresh_form_height)
         QTimer.singleShot(200, self._refresh_com_ports)
 
     # ── public API ─────────────────────────────────────────────────────────
+
+    def refresh_layout(self) -> None:
+        """Re-apply form size after mode/tab switch (page was hidden in QStackedWidget)."""
+        self._apply_form_width()
+        self.layout_changed.emit()
+
+    def required_sidebar_width(self) -> int:
+        """Sidebar width that fits the form without horizontal clipping."""
+        form_w = int(getattr(self, "_form_width", 0))
+        gutter = _SCROLLBAR_GUTTER
+        if hasattr(self, "_scroll"):
+            bar = self._scroll.verticalScrollBar()
+            gutter = max(gutter, int(bar.sizeHint().width()) + 8)
+        return form_w + gutter
 
     def reload_profiles(self) -> None:
         self._loading = True
@@ -345,6 +327,8 @@ class SetupPage(QWidget):
         self._restore_settings()
         self._reload_loc_profiles()
         self._update_mavlink_track_bounds()
+        self._apply_form_width()
+        self._sync_session_combo_widths()
 
     def get_sessions_dir(self) -> str:
         return ui_settings.load().get("sessions_dir", "sessions")
@@ -377,21 +361,7 @@ class SetupPage(QWidget):
         return self._btn_loc_reset
 
     def mavlink_settings(self) -> dict:
-        anchors: dict[str, dict[str, float]] = {}
-        for key, fields in self._spn_mavlink_anchors.items():
-            anchors[key] = {
-                field: float(spn.value())
-                for field, spn in fields.items()
-            }
-        return {
-            "source": self._combo_mavlink_source.currentData() or _MAV_SRC_CAMKF,
-            "enabled": bool(self._chk_mavlink_enabled.isChecked()),
-            "host": self._txt_mavlink_host.text().strip() or "127.0.0.1",
-            "port": int(self._spn_mavlink_port.value()),
-            "system_id": int(self._spn_mavlink_sysid.value()),
-            "component_id": int(self._spn_mavlink_compid.value()),
-            "anchors": anchors,
-        }
+        return read_mavlink_settings(self._mavlink)
 
     def set_recording(self, active: bool) -> None:
         self._recording = active
@@ -611,21 +581,22 @@ class SetupPage(QWidget):
         if isinstance(track_data, dict):
             bounds = track_data.get("bounds")
         if not isinstance(bounds, dict):
-            self._lbl_mavlink_bounds.setText("Bounds: no track selected")
-            return
-        try:
-            origin_x = float(bounds.get("origin_x", 0.0))
-            origin_z = float(bounds.get("origin_z", 0.0))
-            size_x = float(bounds["x"])
-            size_z = float(bounds.get("z", bounds["y"]))
-        except (KeyError, TypeError, ValueError):
-            self._lbl_mavlink_bounds.setText("Bounds: invalid track.json bounds")
-            return
-        self._lbl_mavlink_bounds.setText(
-            f"Local anchors: 0.0=({origin_x:.2f},{origin_z:.2f}), "
-            f"X.0=({origin_x + size_x:.2f},{origin_z:.2f}), "
-            f"0.Z=({origin_x:.2f},{origin_z + size_z:.2f})",
-        )
+            self._mavlink.lbl_bounds.setText("Bounds: no track selected")
+        else:
+            try:
+                origin_x = float(bounds.get("origin_x", 0.0))
+                origin_z = float(bounds.get("origin_z", 0.0))
+                size_x = float(bounds["x"])
+                size_z = float(bounds.get("z", bounds["y"]))
+            except (KeyError, TypeError, ValueError):
+                self._mavlink.lbl_bounds.setText("Bounds: invalid track.json bounds")
+            else:
+                self._mavlink.lbl_bounds.setText(
+                    f"Local anchors: 0.0=({origin_x:.2f},{origin_z:.2f}), "
+                    f"X.0=({origin_x + size_x:.2f},{origin_z:.2f}), "
+                    f"0.Z=({origin_x:.2f},{origin_z + size_z:.2f})",
+                )
+        QTimer.singleShot(0, self._refresh_form_height)
 
     def _on_mavlink_changed(self) -> None:
         ui_settings.update("mavlink", self.mavlink_settings())
@@ -763,6 +734,70 @@ class SetupPage(QWidget):
 
     # ── helpers ────────────────────────────────────────────────────────────
 
+    def _apply_form_width(self) -> None:
+        """Fit sidebar form; Mavlink grid keeps full width (Alt column must stay visible)."""
+        if hasattr(self, "_mavlink"):
+            finalize_mavlink_panel(self._mavlink)
+            self._mavlink.box.adjustSize()
+        self._form_content.adjustSize()
+        natural_w = max(
+            self._form_content.sizeHint().width(),
+            self._form_content.minimumSizeHint().width(),
+        )
+        content_margins = 12
+        mav_need = mavlink_panel_min_width() + content_margins
+        scaled = max(
+            _FORM_MIN_WIDTH,
+            int(round(natural_w / _SIDEBAR_WIDTH_DIVISOR)),
+            mav_need,
+        )
+        self._form_width = scaled
+        self._form_content.setFixedWidth(self._form_width)
+        self._refresh_form_height()
+
+    def _refresh_form_height(self) -> None:
+        """Scroll content must be tall enough — Record was squeezing Mavlink vertically."""
+        if hasattr(self, "_mavlink"):
+            finalize_mavlink_panel(self._mavlink)
+        lay = self._form_content.layout()
+        if lay is not None:
+            lay.activate()
+        self._form_content.adjustSize()
+        if lay is not None:
+            h = lay.minimumSize().height()
+        else:
+            h = max(
+                self._form_content.sizeHint().height(),
+                self._form_content.minimumSizeHint().height(),
+            )
+        total_h = h + _SCROLL_BOTTOM_PAD
+        self._form_content.setMinimumHeight(total_h)
+        # QScrollArea (widgetResizable=False) uses widget size(), not minimumHeight.
+        self._form_content.resize(self._form_width, total_h)
+        self._scroll.updateGeometry()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.refresh_layout)
+
+    def _sync_session_combo_widths(self) -> None:
+        """All Session config dropdowns use the same width as Track."""
+        self._combo_track.ensurePolished()
+        avail = max(48, self._form_width - _SESSION_LABEL_W - 12)
+        w = min(self._combo_track.sizeHint().width(), avail)
+        for cb in (
+            self._combo_pilot,
+            self._combo_drone,
+            self._combo_rate,
+            self._combo_camera,
+            self._combo_track,
+        ):
+            cb.setMinimumWidth(w)
+            cb.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+
     @staticmethod
     def _make_combo(placeholder: str, layout: QVBoxLayout) -> QComboBox:
         row = QHBoxLayout()
@@ -774,7 +809,7 @@ class SetupPage(QWidget):
         cb = QComboBox()
         cb.setPlaceholderText(placeholder)
         cb.setToolTip(placeholder)
-        cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        cb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row.addWidget(cb, stretch=1)
         layout.addLayout(row)
         return cb

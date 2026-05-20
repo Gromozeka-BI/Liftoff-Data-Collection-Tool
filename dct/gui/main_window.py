@@ -169,16 +169,17 @@ class MainWindow(QMainWindow):
 
         self._main_split.addWidget(self._content_split)
 
-        # Sidebar
-        self._sidebar = Sidebar()
+        # Sidebar (width matches Setup form so nothing clips on the right)
         self._setup_page = SetupPage()
         self._replay_page = ReplayPage()
+        self._sidebar = Sidebar(width=self._setup_page.required_sidebar_width())
         self._sidebar.add_page(self._setup_page)
         self._sidebar.add_page(self._replay_page)
         self._main_split.addWidget(self._sidebar)
         self._main_split.setStretchFactor(0, 1)
         self._main_split.setStretchFactor(1, 0)
-        self._main_split.setSizes([1360, 160])
+        self._main_split.splitterMoved.connect(self._on_main_split_moved)
+        self._apply_fixed_sidebar_width()
 
         vbox.addWidget(self._main_split, stretch=1)
 
@@ -196,12 +197,14 @@ class MainWindow(QMainWindow):
         self._top_bar.toggle_sidebar.connect(self._sidebar.toggle)
 
         self._sidebar.collapsed_changed.connect(self._top_bar.set_sidebar_collapsed)
+        self._sidebar.collapsed_changed.connect(self._on_sidebar_collapsed_changed)
         self._sidebar.page_changed.connect(self._on_sidebar_page_changed)
 
         self._setup_page.video_source_changed.connect(self._on_video_source_changed)
         self._setup_page.cfg_changed.connect(self._refresh_summary)
         self._setup_page.localizer_settings_changed.connect(self._on_loc_show_changed)
         self._setup_page.mavlink_settings_changed.connect(self._on_mavlink_settings_changed)
+        self._setup_page.layout_changed.connect(self._on_setup_layout_changed)
         self._replay_page.mavlink_settings_changed.connect(self._on_mavlink_settings_changed)
         self._setup_page.reset_filter_button().clicked.connect(self._reset_localizer)
 
@@ -255,6 +258,7 @@ class MainWindow(QMainWindow):
             self._start_preview(self._setup_page.current_video_source())
             self._setup_page._update_mavlink_track_bounds()
             self._configure_mavlink()
+            QTimer.singleShot(0, self._setup_page.refresh_layout)
         else:
             self._sidebar.set_page(PAGE_REPLAY)
             self._bottom.set_replay_mode()
@@ -282,6 +286,13 @@ class MainWindow(QMainWindow):
             self._switch_mode(MODE_RECORD)
         elif idx == PAGE_REPLAY and self._mode != MODE_REPLAY:
             self._switch_mode(MODE_REPLAY)
+        elif idx == PAGE_SETUP:
+            QTimer.singleShot(0, self._setup_page.refresh_layout)
+
+    def _on_setup_layout_changed(self) -> None:
+        w = self._setup_page.required_sidebar_width()
+        self._sidebar.set_fixed_width_px(w)
+        self._apply_fixed_sidebar_width()
 
     def _on_summary_clicked(self) -> None:
         if self._sidebar.is_collapsed():
@@ -1785,12 +1796,36 @@ class MainWindow(QMainWindow):
         if sb.get("collapsed"):
             self._sidebar.set_collapsed(True)
             self._top_bar.set_sidebar_collapsed(True)
+        QTimer.singleShot(0, self._apply_fixed_sidebar_width)
 
         # Restore last active mode (default: Record)
         saved_mode = s.get("last_mode", "record")
         if saved_mode == "replay":
             # Use a short delay so the window is fully shown before switching
             QTimer.singleShot(0, lambda: self._switch_mode(MODE_REPLAY))
+
+    @pyqtSlot(bool)
+    def _on_sidebar_collapsed_changed(self, collapsed: bool) -> None:
+        if not collapsed:
+            QTimer.singleShot(0, self._apply_fixed_sidebar_width)
+
+    def _apply_fixed_sidebar_width(self) -> None:
+        """Sidebar (Setup/Replay) has a fixed width; main content takes the rest."""
+        if self._sidebar.is_collapsed():
+            return
+        target = self._sidebar.fixed_width
+        sizes = self._main_split.sizes()
+        if len(sizes) != 2 or sizes[1] == target:
+            return
+        total = max(sum(sizes), target + 400)
+        self._main_split.blockSignals(True)
+        try:
+            self._main_split.setSizes([total - target, target])
+        finally:
+            self._main_split.blockSignals(False)
+
+    def _on_main_split_moved(self, _pos: int, _index: int) -> None:
+        self._apply_fixed_sidebar_width()
 
     def _save_window_state(self) -> None:
         s = ui_settings.load()
@@ -1813,7 +1848,6 @@ class MainWindow(QMainWindow):
             win["screen_name"] = screen.name()
         sb = s.setdefault("sidebar", {})
         sb["collapsed"] = bool(self._sidebar.is_collapsed())
-        sb["width"] = int(self._sidebar.width())
         s["last_mode"] = "replay" if self._mode == MODE_REPLAY else "record"
         ui_settings.save(s)
 
@@ -1821,6 +1855,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
+        self._apply_fixed_sidebar_width()
         portrait = self.height() > self.width()
         if portrait != self._is_portrait:
             self._is_portrait = portrait

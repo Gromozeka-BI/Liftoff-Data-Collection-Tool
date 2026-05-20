@@ -14,7 +14,7 @@
     }
   },
   "pilot": "PlatOnAir",
-  "drone": "MadTrainer",
+  "drone": "330Class_Training_2026_7050",
   "rate": "PlatOnAir_rate",
   "camera": "55 deg / 130 FOV",
   "track": "MAD FGDR 2026 Las Vegas TeamRace",
@@ -32,15 +32,15 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAD///pg///9lP////8AAAdz///5+gAAAFL///5CAAAEQQAAAAECAAAABaD///pg///9s/////8AAAdz",
-    "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
-    "split_content": "AAAA/wAAAAEAAAACAAAFjwAAA7QAAAAAAwEAAAACAA==",
-    "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAABAA==",
-    "screen_name": "Acer VG270U"
+    "geometry": "AdnQywADAAAAAAAA////+AAAB38AAAQPAAAC/gAAAB8AAAdGAAAEDgAAAAACAAAAB4AAAAAAAAAAFwAAB38AAAQP",
+    "split_main": "AAAA/wAAAAEAAAACAAADOQAAAQ0AAAAAAwEAAAABAA==",
+    "split_content": "AAAA/wAAAAEAAAACAAAB4AAAAWgAAAAAAwEAAAABAA==",
+    "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAACAA==",
+    "screen_name": "XF273 Z"
   },
   "sidebar": {
     "collapsed": false,
-    "width": 280
+    "width": 320
   },
   "localizer": {
     "track-001": {
@@ -50,11 +50,11 @@
       "profile": "GromFF_1"
     },
     "track-003": {
-      "profile": "GromFF_track003_1"
+      "profile": "default"
     }
   },
   "replay_localizer_enabled": true,
-  "last_mode": "replay",
+  "last_mode": "record",
   "localizer_obs_sigma": 4.0,
   "localizer_use_throttle": true,
   "localizer_ch_weights": [
@@ -72,12 +72,12 @@
     "component_id": 1,
     "anchors": {
       "origin": {
-        "lat": 55.715794200000005,
+        "lat": 55.7157942,
         "lon": 37.553025,
         "alt": 126.0
       },
       "x": {
-        "lat": 55.71605,
+        "lat": 55.71604500000001,
         "lon": 37.5535028,
         "alt": 126.0
       },

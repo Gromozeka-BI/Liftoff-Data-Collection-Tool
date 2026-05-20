@@ -6,16 +6,13 @@ from pathlib import Path
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGroupBox,
-    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy,
-    QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget,
 )
 
 from dct.gui import ui_settings
+from dct.gui.widgets.mavlink_panel import build_mavlink_panel, read_mavlink_settings
 from dct.localization import reference_builder as refbuild
-
-
-_MAV_SRC_CAMKF = "camkf"
-_MAV_SRC_KF = "kf"
 
 
 def _session_dirs(base: Path) -> list[Path]:
@@ -225,95 +222,12 @@ class ReplayPage(QWidget):
         root.addWidget(hints)
 
         # ── MAVLink telemetry ─────────────────────────────────────────────
-        mav_box = QGroupBox("Mavlink")
-        mav_lay = QVBoxLayout(mav_box)
-        mav_lay.setSpacing(4)
-        mav_settings = ui_settings.load().get("mavlink", {})
-
-        source_row = QHBoxLayout()
-        source_row.setSpacing(4)
-        source_row.addWidget(QLabel("Source"))
-        self._combo_mavlink_source = QComboBox()
-        self._combo_mavlink_source.addItem("CamKF", userData=_MAV_SRC_CAMKF)
-        self._combo_mavlink_source.addItem("KF", userData=_MAV_SRC_KF)
-        saved_source = str(mav_settings.get("source", _MAV_SRC_CAMKF))
-        idx = self._combo_mavlink_source.findData(saved_source)
-        if idx >= 0:
-            self._combo_mavlink_source.setCurrentIndex(idx)
-        self._combo_mavlink_source.currentIndexChanged.connect(self._on_mavlink_changed)
-        source_row.addWidget(self._combo_mavlink_source, stretch=1)
-        mav_lay.addLayout(source_row)
-
-        self._chk_mavlink_enabled = QCheckBox("Enable UDP telemetry")
-        self._chk_mavlink_enabled.setChecked(bool(mav_settings.get("enabled", False)))
-        self._chk_mavlink_enabled.stateChanged.connect(self._on_mavlink_changed)
-        mav_lay.addWidget(self._chk_mavlink_enabled)
-
-        endpoint_row = QHBoxLayout()
-        endpoint_row.setSpacing(4)
-        endpoint_row.addWidget(QLabel("Host"))
-        self._txt_mavlink_host = QLineEdit(str(mav_settings.get("host", "127.0.0.1")))
-        self._txt_mavlink_host.editingFinished.connect(self._on_mavlink_changed)
-        endpoint_row.addWidget(self._txt_mavlink_host, stretch=1)
-        endpoint_row.addWidget(QLabel("Port"))
-        self._spn_mavlink_port = QSpinBox()
-        self._spn_mavlink_port.setRange(1, 65535)
-        self._spn_mavlink_port.setValue(int(mav_settings.get("port", 14550)))
-        self._spn_mavlink_port.valueChanged.connect(self._on_mavlink_changed)
-        endpoint_row.addWidget(self._spn_mavlink_port)
-        mav_lay.addLayout(endpoint_row)
-
-        ids_row = QHBoxLayout()
-        ids_row.setSpacing(4)
-        ids_row.addWidget(QLabel("Sys"))
-        self._spn_mavlink_sysid = QSpinBox()
-        self._spn_mavlink_sysid.setRange(1, 255)
-        self._spn_mavlink_sysid.setValue(int(mav_settings.get("system_id", 1)))
-        self._spn_mavlink_sysid.valueChanged.connect(self._on_mavlink_changed)
-        ids_row.addWidget(self._spn_mavlink_sysid)
-        ids_row.addWidget(QLabel("Comp"))
-        self._spn_mavlink_compid = QSpinBox()
-        self._spn_mavlink_compid.setRange(1, 255)
-        self._spn_mavlink_compid.setValue(int(mav_settings.get("component_id", 1)))
-        self._spn_mavlink_compid.valueChanged.connect(self._on_mavlink_changed)
-        ids_row.addWidget(self._spn_mavlink_compid)
-        ids_row.addStretch()
-        mav_lay.addLayout(ids_row)
-
-        anchors = mav_settings.get("anchors", {})
-        self._spn_mavlink_anchors: dict[str, dict[str, QDoubleSpinBox]] = {}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(2)
-        for col, title in enumerate(["Point", "Lat", "Lon", "Alt"]):
-            grid.addWidget(QLabel(title), 0, col)
-        for row, (key, title) in enumerate([("origin", "0.0"), ("x", "X.0"), ("z", "0.Z")], start=1):
-            grid.addWidget(QLabel(title), row, 0)
-            saved = anchors.get(key, {}) if isinstance(anchors, dict) else {}
-            self._spn_mavlink_anchors[key] = {}
-            for col, (field, decimals, default, min_val, max_val) in enumerate(
-                [
-                    ("lat", 7, 0.0, -90.0, 90.0),
-                    ("lon", 7, 0.0, -180.0, 180.0),
-                    ("alt", 2, 0.0, -1000.0, 10000.0),
-                ],
-                start=1,
-            ):
-                spn = QDoubleSpinBox()
-                spn.setRange(min_val, max_val)
-                spn.setDecimals(decimals)
-                spn.setSingleStep(0.000001 if field != "alt" else 0.5)
-                spn.setValue(float(saved.get(field, default)))
-                spn.valueChanged.connect(self._on_mavlink_changed)
-                grid.addWidget(spn, row, col)
-                self._spn_mavlink_anchors[key][field] = spn
-        mav_lay.addLayout(grid)
-
-        self._lbl_mavlink_bounds = QLabel("Bounds: no replay track selected")
-        self._lbl_mavlink_bounds.setProperty("role", "dim")
-        self._lbl_mavlink_bounds.setWordWrap(True)
-        mav_lay.addWidget(self._lbl_mavlink_bounds)
-        root.addWidget(mav_box)
+        self._mavlink = build_mavlink_panel(
+            ui_settings.load().get("mavlink", {}),
+            bounds_default="Bounds: no replay track selected",
+            on_changed=self._on_mavlink_changed,
+        )
+        root.addWidget(self._mavlink.box)
 
         root.addStretch(1)
         self.reload_sessions()
@@ -388,25 +302,11 @@ class ReplayPage(QWidget):
         return self._btn_loc_reset
 
     def mavlink_settings(self) -> dict:
-        anchors: dict[str, dict[str, float]] = {}
-        for key, fields in self._spn_mavlink_anchors.items():
-            anchors[key] = {
-                field: float(spn.value())
-                for field, spn in fields.items()
-            }
-        return {
-            "source": self._combo_mavlink_source.currentData() or _MAV_SRC_CAMKF,
-            "enabled": bool(self._chk_mavlink_enabled.isChecked()),
-            "host": self._txt_mavlink_host.text().strip() or "127.0.0.1",
-            "port": int(self._spn_mavlink_port.value()),
-            "system_id": int(self._spn_mavlink_sysid.value()),
-            "component_id": int(self._spn_mavlink_compid.value()),
-            "anchors": anchors,
-        }
+        return read_mavlink_settings(self._mavlink)
 
     def set_mavlink_track_bounds(self, bounds: dict | None) -> None:
         if not isinstance(bounds, dict):
-            self._lbl_mavlink_bounds.setText("Bounds: no replay track selected")
+            self._mavlink.lbl_bounds.setText("Bounds: no replay track selected")
             return
         try:
             origin_x = float(bounds.get("origin_x", 0.0))
@@ -414,9 +314,9 @@ class ReplayPage(QWidget):
             size_x = float(bounds["x"])
             size_z = float(bounds.get("z", bounds["y"]))
         except (KeyError, TypeError, ValueError):
-            self._lbl_mavlink_bounds.setText("Bounds: invalid track.json bounds")
+            self._mavlink.lbl_bounds.setText("Bounds: invalid track.json bounds")
             return
-        self._lbl_mavlink_bounds.setText(
+        self._mavlink.lbl_bounds.setText(
             f"Local anchors: 0.0=({origin_x:.2f},{origin_z:.2f}), "
             f"X.0=({origin_x + size_x:.2f},{origin_z:.2f}), "
             f"0.Z=({origin_x:.2f},{origin_z + size_z:.2f})",

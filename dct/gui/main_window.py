@@ -201,11 +201,12 @@ class MainWindow(QMainWindow):
         self._setup_page.video_source_changed.connect(self._on_video_source_changed)
         self._setup_page.cfg_changed.connect(self._refresh_summary)
         self._setup_page.localizer_settings_changed.connect(self._on_loc_show_changed)
+        self._setup_page.mavlink_settings_changed.connect(self._on_mavlink_settings_changed)
+        self._replay_page.mavlink_settings_changed.connect(self._on_mavlink_settings_changed)
         self._setup_page.reset_filter_button().clicked.connect(self._reset_localizer)
 
         self._replay_page.session_selected.connect(self._on_replay_session_selected)
         self._replay_page.localizer_settings_changed.connect(self._on_replay_loc_settings_changed)
-        self._replay_page.mavlink_settings_changed.connect(self._on_replay_mavlink_settings_changed)
         self._replay_page.reset_filter_button().clicked.connect(self._reset_localizer)
 
         # Keep pages in sync with invert checkboxes so dialogs use the right convention
@@ -252,18 +253,20 @@ class MainWindow(QMainWindow):
             self._sidebar.set_page(PAGE_SETUP)
             self._bottom.set_record_mode()
             self._start_preview(self._setup_page.current_video_source())
-            self._close_mavlink_sender()
-            self._mavlink_transform = None
+            self._setup_page._update_mavlink_track_bounds()
+            self._configure_mavlink()
         else:
             self._sidebar.set_page(PAGE_REPLAY)
             self._bottom.set_replay_mode()
             self._stop_preview()
+            bounds = self._current_track.get("bounds") if self._current_track else None
+            self._replay_page.set_mavlink_track_bounds(bounds)
+            self._configure_mavlink()
             self._replay_page.reload_sessions()
             self._teardown_localizer()
             # Re-init localizer immediately if a session was already selected.
             if self._last_replay_path:
                 self._try_init_localizer_for_replay(Path(self._last_replay_path))
-            self._configure_replay_mavlink()
 
         self._map.clear_trail()
         self._video.set_gate_overlay(None)
@@ -1000,7 +1003,39 @@ class MainWindow(QMainWindow):
             float(res_out.progress),
             float(res_out.uncertainty_m),
         )
-        self._send_replay_mavlink_position(res_out.position_xyz, ts)
+        self._send_mavlink_position(res_out.position_xyz, ts, "camkf")
+
+    def _update_record_cam_localizer(self, sticks: list[float], ts: float) -> None:
+        """CamKF during Record (no replay camera inject)."""
+        if self._mode != MODE_RECORD or self._localizer_cam is None:
+            return
+        dt = (ts - self._prev_cam_ts_wall) if self._prev_cam_ts_wall is not None else None
+        if dt is not None and (dt < 0 or dt > 2.0):
+            dt = None
+        self._prev_cam_ts_wall = ts
+        res_cam = self._localizer_cam.update(
+            sticks,
+            dt,
+            rate_profile=self._current_rate_profile,
+        )
+        res_out = res_cam
+        if self._kf_layer2_cam is not None:
+            if self._localizer_cam.waiting_for_throttle_start:
+                self._kf_layer2_cam.reset()
+            else:
+                res_out = self._kf_layer2_cam.update(res_cam, dt)
+        self._map.update_localizer_cam_estimate(
+            float(res_out.position_xyz[0]),
+            float(res_out.position_xyz[2]),
+            injected=False,
+        )
+        self._last_cam_loc = (
+            float(res_out.position_xyz[0]),
+            float(res_out.position_xyz[2]),
+            float(res_out.progress),
+            float(res_out.uncertainty_m),
+        )
+        self._send_mavlink_position(res_out.position_xyz, ts, "camkf")
 
     @pyqtSlot()
     def _on_replay_loc_settings_changed(self) -> None:
@@ -1013,18 +1048,25 @@ class MainWindow(QMainWindow):
             self._reset_localizer_on_seek()
 
     @pyqtSlot()
-    def _on_replay_mavlink_settings_changed(self) -> None:
-        self._configure_replay_mavlink()
+    def _on_mavlink_settings_changed(self) -> None:
+        self._configure_mavlink()
+
+    def _active_mavlink_settings(self) -> dict:
+        if self._mode == MODE_REPLAY:
+            return self._replay_page.mavlink_settings()
+        return self._setup_page.mavlink_settings()
 
     def _close_mavlink_sender(self) -> None:
         if self._mavlink_sender is not None:
             self._mavlink_sender.close()
         self._mavlink_sender = None
 
-    def _configure_replay_mavlink(self) -> None:
+    def _configure_mavlink(self) -> None:
         self._close_mavlink_sender()
         self._mavlink_transform = None
-        settings = self._replay_page.mavlink_settings()
+        if self._mode not in (MODE_RECORD, MODE_REPLAY):
+            return
+        settings = self._active_mavlink_settings()
         if not settings.get("enabled"):
             return
         self._mavlink_transform = build_transform_from_settings(
@@ -1032,8 +1074,9 @@ class MainWindow(QMainWindow):
             settings,
         )
         if self._mavlink_transform is None:
-            _log.info("Replay MAVLink disabled: missing or invalid track bounds/anchors")
+            _log.info("MAVLink disabled: missing or invalid track bounds/anchors")
             return
+        mode_label = "Replay" if self._mode == MODE_REPLAY else "Record"
         try:
             self._mavlink_sender = MavlinkUdpSender(
                 settings["host"],
@@ -1043,23 +1086,37 @@ class MainWindow(QMainWindow):
             )
             self._mavlink_sender.send_heartbeat(force=True)
             _log.info(
-                "Replay MAVLink UDP enabled: %s:%s",
+                "%s MAVLink UDP enabled (source=%s): %s:%s",
+                mode_label,
+                settings.get("source", "camkf"),
                 settings["host"],
                 settings["port"],
             )
         except Exception as exc:
             self._mavlink_sender = None
             self._mavlink_transform = None
-            _log.warning("Replay MAVLink init failed: %s", exc)
+            _log.warning("%s MAVLink init failed: %s", mode_label, exc)
 
-    def _send_replay_mavlink_position(self, xyz: np.ndarray, ts_wall: float) -> None:
+    def _send_mavlink_position(
+        self,
+        xyz: np.ndarray,
+        ts_wall: float,
+        source: str,
+    ) -> None:
+        if self._mode not in (MODE_RECORD, MODE_REPLAY):
+            return
+        settings = self._active_mavlink_settings()
+        if not settings.get("enabled"):
+            return
+        if settings.get("source", "camkf") != source:
+            return
         if self._mavlink_sender is None or self._mavlink_transform is None:
             return
         try:
             point = self._mavlink_transform.to_geo(xyz)
             self._mavlink_sender.send_global_position(point, ts_wall)
         except Exception as exc:
-            _log.warning("Replay MAVLink send failed: %s", exc)
+            _log.warning("MAVLink send failed: %s", exc)
 
     # ── record session ─────────────────────────────────────────────────────
 
@@ -1120,6 +1177,8 @@ class MainWindow(QMainWindow):
 
         self._init_localizer_from_cfg(cfg)
         self._on_loc_show_changed()
+        self._setup_page._update_mavlink_track_bounds()
+        self._configure_mavlink()
 
         import time as _time
         self._graphs.set_time_zero(_time.time())
@@ -1218,10 +1277,9 @@ class MainWindow(QMainWindow):
             self._current_track = track_data
         else:
             self._current_track = None
-        self._replay_page.set_mavlink_track_bounds(
-            self._current_track.get("bounds") if self._current_track else None,
-        )
-        self._configure_replay_mavlink()
+        bounds = self._current_track.get("bounds") if self._current_track else None
+        self._replay_page.set_mavlink_track_bounds(bounds)
+        self._configure_mavlink()
         # Use the unified helper so meta.json / folder name are also checked
         replay_track_id = self._session_track_id(p)
         self._replay_page.set_localizer_track(replay_track_id)
@@ -1541,13 +1599,25 @@ class MainWindow(QMainWindow):
                             float(res_kf.progress),
                             float(res_kf.uncertainty_m),
                         )
+                        if self._mode in (MODE_RECORD, MODE_REPLAY):
+                            self._send_mavlink_position(
+                                res_kf.position_xyz,
+                                ts,
+                                "kf",
+                            )
                     except Exception as exc:
                         _log.warning("KF Layer 2 update failed: %s", exc)
 
-                try:
-                    self._update_replay_cam_localizer(list(sticks), ts)
-                except Exception as exc:
-                    _log.warning("Replay CamKF update failed: %s", exc)
+                if self._mode == MODE_REPLAY:
+                    try:
+                        self._update_replay_cam_localizer(list(sticks), ts)
+                    except Exception as exc:
+                        _log.warning("Replay CamKF update failed: %s", exc)
+                elif self._mode == MODE_RECORD:
+                    try:
+                        self._update_record_cam_localizer(list(sticks), ts)
+                    except Exception as exc:
+                        _log.warning("Record CamKF update failed: %s", exc)
 
             except Exception as exc:
                 _log.warning("Localizer RC update failed: %s", exc)

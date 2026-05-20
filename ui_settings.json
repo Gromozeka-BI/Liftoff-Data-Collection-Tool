@@ -18,11 +18,11 @@
   "rate": "PlatOnAir_rate",
   "camera": "55 deg / 130 FOV",
   "track": "MAD FGDR 2026 Las Vegas TeamRace",
-  "ds_mode": "both",
-  "com_port": "COM3",
+  "ds_mode": "liftoff",
+  "com_port": "COM1",
   "video_source_index": 1,
   "sessions_dir": "D:/DroneTrackerDB/Liftoff/Part_0_Калибровка",
-  "replay_dir": "D:/DroneTrackerDB/Liftoff/Part_5_Эксперементальный",
+  "replay_dir": "D:/BackUpV2/DroneTrackerDB/Liftoff/Part_5_Эксперементальный",
   "localizer_reference_npz": "C:/Users/Gromozeka/YandexDisk/Магистратура/Диплом/DCT/dct/localization/reference.npz",
   "localizer_enabled": true,
   "race": {
@@ -32,11 +32,11 @@
     ]
   },
   "window": {
-    "geometry": "AdnQywADAAAAAAABAAAAAAAABEYAAAQOAAAAAQAAAB8AAARGAAAEDgAAAAAAAAAAB4AAAAABAAAAHwAABEYAAAQO",
+    "geometry": "AdnQywADAAD///pg///9lP////8AAAdz///5+gAAAFL///5CAAAEQQAAAAECAAAABaD///pg///9s/////8AAAdz",
     "split_main": "AAAA/wAAAAEAAAACAAAGZQAAARgAAAAAAwEAAAABAA==",
-    "split_content": "AAAA/wAAAAEAAAACAAACiAAAAbAAAAAAAwEAAAABAA==",
-    "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAACAA==",
-    "screen_name": "XF273 Z"
+    "split_content": "AAAA/wAAAAEAAAACAAAFjwAAA7QAAAAAAwEAAAACAA==",
+    "split_right": "AAAA/wAAAAEAAAACAAABjAAAAfEAAAAAAwEAAAABAA==",
+    "screen_name": "Acer VG270U"
   },
   "sidebar": {
     "collapsed": false,
@@ -64,14 +64,15 @@
     1.0
   ],
   "mavlink": {
-    "enabled": true,
+    "source": "camkf",
+    "enabled": false,
     "host": "127.0.0.1",
     "port": 14550,
     "system_id": 1,
     "component_id": 1,
     "anchors": {
       "origin": {
-        "lat": 55.7157972,
+        "lat": 55.715794200000005,
         "lon": 37.553025,
         "alt": 126.0
       },

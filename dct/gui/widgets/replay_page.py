@@ -14,6 +14,10 @@ from dct.gui import ui_settings
 from dct.localization import reference_builder as refbuild
 
 
+_MAV_SRC_CAMKF = "camkf"
+_MAV_SRC_KF = "kf"
+
+
 def _session_dirs(base: Path) -> list[Path]:
     if not base.exists():
         return []
@@ -226,6 +230,20 @@ class ReplayPage(QWidget):
         mav_lay.setSpacing(4)
         mav_settings = ui_settings.load().get("mavlink", {})
 
+        source_row = QHBoxLayout()
+        source_row.setSpacing(4)
+        source_row.addWidget(QLabel("Source"))
+        self._combo_mavlink_source = QComboBox()
+        self._combo_mavlink_source.addItem("CamKF", userData=_MAV_SRC_CAMKF)
+        self._combo_mavlink_source.addItem("KF", userData=_MAV_SRC_KF)
+        saved_source = str(mav_settings.get("source", _MAV_SRC_CAMKF))
+        idx = self._combo_mavlink_source.findData(saved_source)
+        if idx >= 0:
+            self._combo_mavlink_source.setCurrentIndex(idx)
+        self._combo_mavlink_source.currentIndexChanged.connect(self._on_mavlink_changed)
+        source_row.addWidget(self._combo_mavlink_source, stretch=1)
+        mav_lay.addLayout(source_row)
+
         self._chk_mavlink_enabled = QCheckBox("Enable UDP telemetry")
         self._chk_mavlink_enabled.setChecked(bool(mav_settings.get("enabled", False)))
         self._chk_mavlink_enabled.stateChanged.connect(self._on_mavlink_changed)
@@ -377,6 +395,7 @@ class ReplayPage(QWidget):
                 for field, spn in fields.items()
             }
         return {
+            "source": self._combo_mavlink_source.currentData() or _MAV_SRC_CAMKF,
             "enabled": bool(self._chk_mavlink_enabled.isChecked()),
             "host": self._txt_mavlink_host.text().strip() or "127.0.0.1",
             "port": int(self._spn_mavlink_port.value()),

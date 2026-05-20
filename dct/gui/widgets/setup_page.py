@@ -16,8 +16,9 @@ from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel,
-    QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGroupBox,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from dct.gui import theme, ui_settings
@@ -31,6 +32,9 @@ _PROFILES_DIR = Path("profiles")
 _SRC_LIFTOFF = "liftoff"
 _SRC_RC      = "rc"
 _SRC_BOTH    = "both"
+
+_MAV_SRC_CAMKF = "camkf"
+_MAV_SRC_KF = "kf"
 
 
 def _scan_dir(subdir: str) -> list[dict]:
@@ -60,6 +64,7 @@ class SetupPage(QWidget):
     cfg_changed              = pyqtSignal()
     video_source_changed     = pyqtSignal(dict)
     localizer_settings_changed = pyqtSignal()
+    mavlink_settings_changed = pyqtSignal()
 
     _video_devices_ready = pyqtSignal(list)
     _com_ports_ready     = pyqtSignal(list)
@@ -210,6 +215,97 @@ class SetupPage(QWidget):
         loc_lay.addLayout(action_row)
         root.addWidget(loc_box)
 
+        # ── MAVLink telemetry (Record) ────────────────────────────────────
+        mav_box = QGroupBox("Mavlink")
+        mav_lay = QVBoxLayout(mav_box)
+        mav_lay.setSpacing(4)
+        mav_settings = ui_settings.load().get("mavlink", {})
+
+        source_row = QHBoxLayout()
+        source_row.setSpacing(4)
+        source_row.addWidget(QLabel("Source"))
+        self._combo_mavlink_source = QComboBox()
+        self._combo_mavlink_source.addItem("CamKF", userData=_MAV_SRC_CAMKF)
+        self._combo_mavlink_source.addItem("KF", userData=_MAV_SRC_KF)
+        saved_source = str(mav_settings.get("source", _MAV_SRC_CAMKF))
+        idx = self._combo_mavlink_source.findData(saved_source)
+        if idx >= 0:
+            self._combo_mavlink_source.setCurrentIndex(idx)
+        self._combo_mavlink_source.currentIndexChanged.connect(self._on_mavlink_changed)
+        source_row.addWidget(self._combo_mavlink_source, stretch=1)
+        mav_lay.addLayout(source_row)
+
+        self._chk_mavlink_enabled = QCheckBox("Enable UDP telemetry")
+        self._chk_mavlink_enabled.setChecked(bool(mav_settings.get("enabled", False)))
+        self._chk_mavlink_enabled.stateChanged.connect(self._on_mavlink_changed)
+        mav_lay.addWidget(self._chk_mavlink_enabled)
+
+        endpoint_row = QHBoxLayout()
+        endpoint_row.setSpacing(4)
+        endpoint_row.addWidget(QLabel("Host"))
+        self._txt_mavlink_host = QLineEdit(str(mav_settings.get("host", "127.0.0.1")))
+        self._txt_mavlink_host.editingFinished.connect(self._on_mavlink_changed)
+        endpoint_row.addWidget(self._txt_mavlink_host, stretch=1)
+        endpoint_row.addWidget(QLabel("Port"))
+        self._spn_mavlink_port = QSpinBox()
+        self._spn_mavlink_port.setRange(1, 65535)
+        self._spn_mavlink_port.setValue(int(mav_settings.get("port", 14550)))
+        self._spn_mavlink_port.valueChanged.connect(self._on_mavlink_changed)
+        endpoint_row.addWidget(self._spn_mavlink_port)
+        mav_lay.addLayout(endpoint_row)
+
+        ids_row = QHBoxLayout()
+        ids_row.setSpacing(4)
+        ids_row.addWidget(QLabel("Sys"))
+        self._spn_mavlink_sysid = QSpinBox()
+        self._spn_mavlink_sysid.setRange(1, 255)
+        self._spn_mavlink_sysid.setValue(int(mav_settings.get("system_id", 1)))
+        self._spn_mavlink_sysid.valueChanged.connect(self._on_mavlink_changed)
+        ids_row.addWidget(self._spn_mavlink_sysid)
+        ids_row.addWidget(QLabel("Comp"))
+        self._spn_mavlink_compid = QSpinBox()
+        self._spn_mavlink_compid.setRange(1, 255)
+        self._spn_mavlink_compid.setValue(int(mav_settings.get("component_id", 1)))
+        self._spn_mavlink_compid.valueChanged.connect(self._on_mavlink_changed)
+        ids_row.addWidget(self._spn_mavlink_compid)
+        ids_row.addStretch()
+        mav_lay.addLayout(ids_row)
+
+        anchors = mav_settings.get("anchors", {})
+        self._spn_mavlink_anchors: dict[str, dict[str, QDoubleSpinBox]] = {}
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(2)
+        for col, title in enumerate(["Point", "Lat", "Lon", "Alt"]):
+            grid.addWidget(QLabel(title), 0, col)
+        for row, (key, title) in enumerate([("origin", "0.0"), ("x", "X.0"), ("z", "0.Z")], start=1):
+            grid.addWidget(QLabel(title), row, 0)
+            saved = anchors.get(key, {}) if isinstance(anchors, dict) else {}
+            self._spn_mavlink_anchors[key] = {}
+            for col, (field, decimals, default, min_val, max_val) in enumerate(
+                [
+                    ("lat", 7, 0.0, -90.0, 90.0),
+                    ("lon", 7, 0.0, -180.0, 180.0),
+                    ("alt", 2, 0.0, -1000.0, 10000.0),
+                ],
+                start=1,
+            ):
+                spn = QDoubleSpinBox()
+                spn.setRange(min_val, max_val)
+                spn.setDecimals(decimals)
+                spn.setSingleStep(0.000001 if field != "alt" else 0.5)
+                spn.setValue(float(saved.get(field, default)))
+                spn.valueChanged.connect(self._on_mavlink_changed)
+                grid.addWidget(spn, row, col)
+                self._spn_mavlink_anchors[key][field] = spn
+        mav_lay.addLayout(grid)
+
+        self._lbl_mavlink_bounds = QLabel("Bounds: no track selected")
+        self._lbl_mavlink_bounds.setProperty("role", "dim")
+        self._lbl_mavlink_bounds.setWordWrap(True)
+        mav_lay.addWidget(self._lbl_mavlink_bounds)
+        root.addWidget(mav_box)
+
         root.addStretch(1)
 
         # ── Connections ────────────────────────────────────────────────────
@@ -222,6 +318,7 @@ class SetupPage(QWidget):
             combo.currentIndexChanged.connect(self.cfg_changed)
 
         self._combo_track.currentIndexChanged.connect(self._reload_loc_profiles)
+        self._combo_track.currentIndexChanged.connect(self._update_mavlink_track_bounds)
         self._combo_ds_mode.currentIndexChanged.connect(self._save_settings)
         self._combo_com.currentIndexChanged.connect(self._save_settings)
 
@@ -247,6 +344,7 @@ class SetupPage(QWidget):
             self._loading = False
         self._restore_settings()
         self._reload_loc_profiles()
+        self._update_mavlink_track_bounds()
 
     def get_sessions_dir(self) -> str:
         return ui_settings.load().get("sessions_dir", "sessions")
@@ -277,6 +375,23 @@ class SetupPage(QWidget):
 
     def reset_filter_button(self) -> QPushButton:
         return self._btn_loc_reset
+
+    def mavlink_settings(self) -> dict:
+        anchors: dict[str, dict[str, float]] = {}
+        for key, fields in self._spn_mavlink_anchors.items():
+            anchors[key] = {
+                field: float(spn.value())
+                for field, spn in fields.items()
+            }
+        return {
+            "source": self._combo_mavlink_source.currentData() or _MAV_SRC_CAMKF,
+            "enabled": bool(self._chk_mavlink_enabled.isChecked()),
+            "host": self._txt_mavlink_host.text().strip() or "127.0.0.1",
+            "port": int(self._spn_mavlink_port.value()),
+            "system_id": int(self._spn_mavlink_sysid.value()),
+            "component_id": int(self._spn_mavlink_compid.value()),
+            "anchors": anchors,
+        }
 
     def set_recording(self, active: bool) -> None:
         self._recording = active
@@ -489,6 +604,32 @@ class SetupPage(QWidget):
             )
         except Exception:
             return
+
+    def _update_mavlink_track_bounds(self) -> None:
+        track_data = self._combo_track.currentData()
+        bounds = None
+        if isinstance(track_data, dict):
+            bounds = track_data.get("bounds")
+        if not isinstance(bounds, dict):
+            self._lbl_mavlink_bounds.setText("Bounds: no track selected")
+            return
+        try:
+            origin_x = float(bounds.get("origin_x", 0.0))
+            origin_z = float(bounds.get("origin_z", 0.0))
+            size_x = float(bounds["x"])
+            size_z = float(bounds.get("z", bounds["y"]))
+        except (KeyError, TypeError, ValueError):
+            self._lbl_mavlink_bounds.setText("Bounds: invalid track.json bounds")
+            return
+        self._lbl_mavlink_bounds.setText(
+            f"Local anchors: 0.0=({origin_x:.2f},{origin_z:.2f}), "
+            f"X.0=({origin_x + size_x:.2f},{origin_z:.2f}), "
+            f"0.Z=({origin_x:.2f},{origin_z + size_z:.2f})",
+        )
+
+    def _on_mavlink_changed(self) -> None:
+        ui_settings.update("mavlink", self.mavlink_settings())
+        self.mavlink_settings_changed.emit()
 
     def _reload_loc_profiles(self) -> None:
         track_id = self.current_track_id() or ""

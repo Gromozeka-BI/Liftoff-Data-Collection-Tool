@@ -1,0 +1,178 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.3.6 Chrome/140.0.7339.249 Electron/38.8.0 Safari/537.36" version="29.3.6" pages="3">
+  <diagram id="c4-context" name="1. C4 Context">
+    <mxGraphModel dx="1426" dy="849" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-ctx" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=16;fontStyle=1" value="C4 Level 1 — System Context&#xa;Комплекс отслеживания БВС (DCT)" vertex="1">
+          <mxGeometry height="40" width="800" x="400" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="pilot" parent="1" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#08427B;strokeColor=#073B6F;fontColor=#ffffff;shape=mxgraph.c4.person2;align=center;metaEdit=1;resizable=0;" value="Пилот&#xa;[Person]&#xa;Управляет FPV-дроном,&#xa;использует наземную станцию" vertex="1">
+          <mxGeometry height="160" width="200" x="680" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="dct-sys" parent="1" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#1168BD;strokeColor=#0E4884;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" value="DCT&#xa;[Software System]&#xa;Отслеживание БВС по RC-каналам&#xa;и видеопотоку на наземной станции" vertex="1">
+          <mxGeometry height="120" width="320" x="620" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="fpv-platform" parent="1" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" value="FPV-платформа&#xa;[Software System]&#xa;Дрон MADTrainer, EdgeTX/ELRS,&#xa;камера, VTX/VRX (без бортовой навигации)" vertex="1">
+          <mxGeometry height="120" width="300" x="120" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="nebosvod-connect" parent="1" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" value="NebosvodConnect&#xa;[Software System]&#xa;Шлюз MAVLink → СППИ «Небосвод»" vertex="1">
+          <mxGeometry height="100" width="280" x="1050" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="nebosvod" parent="1" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" value="«Небосвод»&#xa;[Software System]&#xa;Внешняя система мониторинга БВС&#xa;(HEPU / VEPU)" vertex="1">
+          <mxGeometry height="100" width="280" x="1050" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pilot-fpv" edge="1" parent="1" source="pilot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;metaEdit=1;" target="fpv-platform" value="Управляет&#xa;[EdgeTX / ELRS]">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pilot-dct" edge="1" parent="1" source="pilot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;metaEdit=1;" target="dct-sys" value="Запускает Record/Replay,&#xa;настраивает трассу">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-fpv-dct" edge="1" parent="1" source="fpv-platform" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;metaEdit=1;" target="dct-sys" value="Передаёт RC и видео&#xa;[радио / USB]">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dct-nc" edge="1" parent="1" source="dct-sys" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;metaEdit=1;" target="nebosvod-connect" value="Отправляет оценку позиции&#xa;[MAVLink UDP, локальная сеть]">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-nc-nb" edge="1" parent="1" source="nebosvod-connect" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;metaEdit=1;" target="nebosvod" value="Публикует трек БВС&#xa;[протокол «Небосвод»]">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="note-ctx" parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=10;fontSize=11;" value="Уровень Context — для разделов 1–2 ВКР (обзор системы и границы).&#xa;Внутренняя структура DCT — на вкладке «2. C4 Container»." vertex="1">
+          <mxGeometry height="70" width="420" x="120" y="520" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="c4-container" name="2. C4 Container">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-ctr" value="C4 Level 2 — Container&#xa;Раздел 2.1 «Общая архитектура комплекса»" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="20" width="800" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="pilot2" value="Пилот&#xa;[Person]" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#08427B;strokeColor=#073B6F;fontColor=#ffffff;shape=mxgraph.c4.person2;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="700" y="70" width="180" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="boundary-dct" value="Комплекс отслеживания БВС&#xa;[Software System]" style="rounded=1;fontSize=11;whiteSpace=wrap;html=1;dashed=1;arcSize=20;fillColor=none;strokeColor=#666666;fontColor=#333333;verticalAlign=top;align=left;spacing=12;dashPattern=8 4;metaEdit=1;rotatable=0;perimeter=rectanglePerimeter;shape=mxgraph.c4.scopeBoundary;" vertex="1" parent="1">
+          <mxGeometry x="380" y="260" width="520" height="420" as="geometry" />
+        </mxCell>
+        <mxCell id="dct-desktop" value="DCT Desktop&#xa;[Container: Python, Desktop]&#xa;Record, Replay, GUI, синхронизация,&#xa;локализация (PF), MAVLink UDP" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#438DD5;strokeColor=#3C7FC0;fontColor=#ffffff;shape=mxgraph.c4.container2;align=center;metaEdit=1;resizable=0;" vertex="1" parent="boundary-dct">
+          <mxGeometry x="60" y="80" width="400" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="session-store" value="Хранилище сессий&#xa;[Container: файловая система]&#xa;rc_channels.parquet, video.mp4,&#xa;telemetry, events, meta.json" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#438DD5;strokeColor=#3C7FC0;fontColor=#ffffff;shape=mxgraph.c4.container2;align=center;metaEdit=1;resizable=0;" vertex="1" parent="boundary-dct">
+          <mxGeometry x="60" y="260" width="400" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="rc-chain" value="RC-цепочка&#xa;[Software System]&#xa;EdgeTX → ELRS TX/RX → ESP32 → COM" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="320" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="video-chain" value="Видеотракт&#xa;[Software System]&#xa;Камера → HDZero VTX → EventVRX → USB-захват" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="500" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="fpv-drone" value="FPV-дрон MADTrainer&#xa;[Software System]&#xa;Курсовая камера, VTX;&#xa;без бортовой навигации" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="nebosvod-connect2" value="NebosvodConnect&#xa;[Container: Desktop]&#xa;Приём MAVLink, привязка БВС&#xa;и плана полёта, авторизация" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#438DD5;strokeColor=#3C7FC0;fontColor=#ffffff;shape=mxgraph.c4.container2;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="360" width="280" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="nebosvod2" value="«Небосвод»&#xa;[Software System]&#xa;СППИ мониторинга" style="html=1;fontSize=11;dashed=0;whiteSpace=wrap;fillColor=#999999;strokeColor=#8A8A8A;fontColor=#ffffff;shape=mxgraph.c4.system;align=center;metaEdit=1;resizable=0;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="540" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pilot-desktop" value="Управляет" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pilot2" target="dct-desktop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pilot-fpv2" value="Пилотирует" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pilot2" target="fpv-drone">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-fpv-video" value="Видеосигнал" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="fpv-drone" target="video-chain">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-rc-desktop" value="RC-каналы&#xa;[COM / serial]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="rc-chain" target="dct-desktop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-video-desktop" value="Кадры видео&#xa;[USB / capture]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="video-chain" target="dct-desktop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-desktop-store" value="Читает / пишет&#xa;[файлы сессии]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;startArrow=block;startFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="dct-desktop" target="session-store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-desktop-nc" value="GLOBAL_POSITION_INT&#xa;[MAVLink UDP]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="dct-desktop" target="nebosvod-connect2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-nc-nb2" value="Передаёт в СППИ" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="nebosvod-connect2" target="nebosvod2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pilot-rc" value="Команды&#xa;[ELRS]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;endArrow=block;endFill=1;labelBackgroundColor=#ffffff;dashed=1;" edge="1" parent="1" source="pilot2" target="rc-chain">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="140" />
+              <mxPoint x="340" y="370" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="legend-ctr" value="&lt;b&gt;C4 в draw.io&lt;/b&gt;&lt;br&gt;• Синий system/container — в scope работы&lt;br&gt;• Серый — внешние системы&lt;br&gt;• Пунктирная рамка — граница Software System&lt;br&gt;• Подписи на стрелках: протокол / назначение&lt;br&gt;&lt;br&gt;Включить фигуры: More Shapes → C4" style="shape=note;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="120" width="280" height="130" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="c4-component" name="3. C4 Component (DCT)">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-cmp" value="C4 Level 3 — Component (внутри DCT Desktop)&#xa;Для главы 3 и приложений с кодом" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=16;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="boundary-desktop" value="DCT Desktop [Container]" style="rounded=1;fontSize=11;whiteSpace=wrap;html=1;dashed=1;arcSize=20;fillColor=none;strokeColor=#666666;fontColor=#333333;verticalAlign=top;align=left;spacing=12;dashPattern=8 4;shape=mxgraph.c4.scopeBoundary;" vertex="1" parent="1">
+          <mxGeometry x="200" y="100" width="1200" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-record" value="Record Pipeline&#xa;[Component]&#xa;Сбор RC, видео, meta" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="40" y="60" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-replay" value="Replay Engine&#xa;[Component]&#xa;Воспроизведение сессии" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="280" y="60" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-sync" value="Sync &amp; Timestamps&#xa;[Component]&#xa;video_timestamps, выравнивание" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="520" y="60" width="200" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-pf" value="OnlineLocalizer&#xa;[Component]&#xa;Particle Filter, RC+Rate" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="40" y="220" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-ref" value="Reference Builder&#xa;[Component]&#xa;Построение референса трассы" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="300" y="220" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-camera" value="Camera Pipeline&#xa;[Component]&#xa;YOLO → PnP → CameraObservation" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="560" y="220" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-mavlink" value="MavlinkUdpSender&#xa;[Component]&#xa;HEARTBEAT, GLOBAL_POSITION_INT" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="860" y="220" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cmp-geo" value="TrackGeoTransform&#xa;[Component]&#xa;Локальные → WGS84 координаты" style="html=1;fontSize=11;whiteSpace=wrap;fillColor=#85BBF0;strokeColor=#78A8D8;fontColor=#000000;shape=mxgraph.c4.component;align=center;" vertex="1" parent="boundary-desktop">
+          <mxGeometry x="860" y="60" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="e-rec-sync" value="" style="endArrow=block;html=1;fontSize=10;" edge="1" parent="boundary-desktop" source="cmp-record" target="cmp-sync">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-rep-pf" value="" style="endArrow=block;html=1;fontSize=10;" edge="1" parent="boundary-desktop" source="cmp-replay" target="cmp-pf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pf-ref" value="сравнение с" style="endArrow=block;html=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="boundary-desktop" source="cmp-pf" target="cmp-ref">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-cam-pf" value="inject_position_observation" style="endArrow=block;html=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="boundary-desktop" source="cmp-camera" target="cmp-pf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-pf-geo" value="локальная позиция" style="endArrow=block;html=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="boundary-desktop" source="cmp-pf" target="cmp-geo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-geo-mav" value="lat/lon/alt" style="endArrow=block;html=1;fontSize=10;labelBackgroundColor=#ffffff;" edge="1" parent="boundary-desktop" source="cmp-geo" target="cmp-mavlink">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="note-cmp" value="Черновик уровня Component. Уточняйте границы модулей по пакетам dct/ при доработке главы 3." style="shape=note;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacing=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="200" y="640" width="500" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

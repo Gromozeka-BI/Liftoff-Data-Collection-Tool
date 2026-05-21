@@ -267,6 +267,7 @@ class MainWindow(QMainWindow):
             self._replay_page.set_mavlink_track_bounds(bounds)
             self._configure_mavlink()
             self._replay_page.reload_sessions()
+            QTimer.singleShot(0, self._replay_page.refresh_layout)
             self._teardown_localizer()
             # Re-init localizer immediately if a session was already selected.
             if self._last_replay_path:
@@ -288,6 +289,8 @@ class MainWindow(QMainWindow):
             self._switch_mode(MODE_REPLAY)
         elif idx == PAGE_SETUP:
             QTimer.singleShot(0, self._setup_page.refresh_layout)
+        elif idx == PAGE_REPLAY:
+            QTimer.singleShot(0, self._replay_page.refresh_layout)
 
     def _on_setup_layout_changed(self) -> None:
         w = self._setup_page.required_sidebar_width()

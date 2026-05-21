@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,10 +22,15 @@ from PyQt6.QtWidgets import (
 MAV_SRC_CAMKF = "camkf"
 MAV_SRC_KF = "kf"
 
-_MAV_POINT_COL_W = 28
-_MAV_FIELD_MIN_W = {"lat": 56, "lon": 56, "alt": 44}
+_MAV_POINT_COL_W = 22
+_MAV_FIELD_MIN_W = {"lat": 48, "lon": 48, "alt": 46}
+_MAV_FIELD_FLOOR = {"lat": 40, "lon": 40, "alt": 40}
+_MAV_COL_SHARE = (0.34, 0.34, 0.32)
 _MAV_ROW_SPACING = 4
 _MAV_ROW_GAP = 4
+_MAV_GROUP_HPAD = 12
+_MAV_SPIN_PORT_W = 58
+_MAV_SPIN_ID_W = 44
 # Row layout (not grid) — normal spinbox height without vertical overlap.
 _ANCHOR_SPIN_H = 28
 
@@ -56,7 +62,9 @@ def _add_anchor_header_row(layout: QVBoxLayout) -> None:
     for key, title in (("lat", "Lat"), ("lon", "Lon"), ("alt", "Alt")):
         lbl = QLabel(title)
         lbl.setFixedWidth(_MAV_FIELD_MIN_W[key])
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(lbl)
+    row.addStretch()
     layout.addLayout(row)
 
 
@@ -66,8 +74,68 @@ def mavlink_panel_min_width() -> int:
         _MAV_POINT_COL_W
         + sum(_MAV_FIELD_MIN_W.values())
         + 3 * _MAV_ROW_SPACING
-        + 20
+        + _MAV_GROUP_HPAD
     )
+
+
+def _column_widths_for_grid(grid_inner_w: int) -> dict[str, int]:
+    """Lat / Lon / Alt — roughly equal; spare width goes to trailing stretch."""
+    avail = grid_inner_w - _MAV_POINT_COL_W - 3 * _MAV_ROW_SPACING
+    avail = max(avail, sum(_MAV_FIELD_FLOOR.values()))
+    lat = max(_MAV_FIELD_FLOOR["lat"], int(avail * _MAV_COL_SHARE[0]))
+    lon = max(_MAV_FIELD_FLOOR["lon"], int(avail * _MAV_COL_SHARE[1]))
+    alt = max(_MAV_FIELD_FLOOR["alt"], int(avail * _MAV_COL_SHARE[2]))
+    total = lat + lon + alt
+    if total > avail:
+        scale = avail / total
+        lat = max(_MAV_FIELD_FLOOR["lat"], int(lat * scale))
+        lon = max(_MAV_FIELD_FLOOR["lon"], int(lon * scale))
+        alt = max(_MAV_FIELD_FLOOR["alt"], avail - lat - lon)
+    return {"lat": lat, "lon": lon, "alt": alt}
+
+
+def _update_anchor_header_widths(
+    anchors_wrap: QWidget,
+    widths: dict[str, int],
+) -> None:
+    lay = anchors_wrap.layout()
+    if lay is None or lay.count() == 0:
+        return
+    row_lay = lay.itemAt(0).layout()
+    if row_lay is None:
+        return
+    for idx, field in enumerate(("lat", "lon", "alt")):
+        item = row_lay.itemAt(idx + 1)
+        w = item.widget() if item else None
+        if w is not None:
+            w.setFixedWidth(widths[field])
+
+
+def _set_anchor_spin_widths(
+    panel: MavlinkPanel,
+    widths: dict[str, int],
+) -> None:
+    for fields in panel.spn_anchors.values():
+        for field, spn in fields.items():
+            spn.setFixedWidth(widths[field])
+    _update_anchor_header_widths(panel.anchors_wrap, widths)
+
+
+def fit_mavlink_panel_to_width(panel: MavlinkPanel, box_width: int) -> None:
+    """Fit Mavlink group to sidebar content width (same as Session config blocks)."""
+    box_width = max(160, int(box_width))
+    panel.box.setMinimumWidth(0)
+    panel.box.setMaximumWidth(box_width)
+    panel.box.setSizePolicy(
+        QSizePolicy.Policy.Preferred,
+        QSizePolicy.Policy.Minimum,
+    )
+    grid_inner = max(120, box_width - _MAV_GROUP_HPAD)
+    widths = _column_widths_for_grid(grid_inner)
+    _set_anchor_spin_widths(panel, widths)
+    panel.spn_port.setFixedWidth(_MAV_SPIN_PORT_W)
+    panel.spn_sysid.setFixedWidth(_MAV_SPIN_ID_W)
+    panel.spn_compid.setFixedWidth(_MAV_SPIN_ID_W)
 
 
 def mavlink_anchors_min_height() -> int:
@@ -86,6 +154,16 @@ def finalize_mavlink_panel(panel: MavlinkPanel) -> None:
     panel.anchors_wrap.adjustSize()
     panel.box.adjustSize()
     panel.box.setMinimumHeight(panel.box.minimumSizeHint().height())
+
+
+def apply_mavlink_panel_layout(
+    panel: MavlinkPanel,
+    content_width: int | None = None,
+) -> None:
+    """Same post-build sizing for Record and Replay."""
+    finalize_mavlink_panel(panel)
+    if content_width is not None and content_width > 0:
+        fit_mavlink_panel_to_width(panel, content_width)
 
 
 @dataclass
@@ -139,6 +217,7 @@ def build_mavlink_panel(
     spn_port = QSpinBox()
     spn_port.setRange(1, 65535)
     spn_port.setValue(int(mav_settings.get("port", 14550)))
+    spn_port.setFixedWidth(_MAV_SPIN_PORT_W)
     endpoint_row.addWidget(spn_port)
     mav_lay.addLayout(endpoint_row)
 
@@ -148,11 +227,13 @@ def build_mavlink_panel(
     spn_sysid = QSpinBox()
     spn_sysid.setRange(1, 255)
     spn_sysid.setValue(int(mav_settings.get("system_id", 1)))
+    spn_sysid.setFixedWidth(_MAV_SPIN_ID_W)
     ids_row.addWidget(spn_sysid)
     ids_row.addWidget(QLabel("Comp"))
     spn_compid = QSpinBox()
     spn_compid.setRange(1, 255)
     spn_compid.setValue(int(mav_settings.get("component_id", 1)))
+    spn_compid.setFixedWidth(_MAV_SPIN_ID_W)
     ids_row.addWidget(spn_compid)
     ids_row.addStretch()
     mav_lay.addLayout(ids_row)
@@ -186,6 +267,7 @@ def build_mavlink_panel(
             )
             row.addWidget(spn)
             spn_anchors[key][field] = spn
+        row.addStretch()
         anchors_lay.addLayout(row)
     mav_lay.addWidget(anchors_wrap)
 

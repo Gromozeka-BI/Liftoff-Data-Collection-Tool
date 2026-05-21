@@ -1,0 +1,50 @@
+<mxfile host="Electron" agent="Mozilla/5.0" version="29.3.6">
+  <diagram id="geo-anchors" name="Геопривязка §4.2">
+    <mxGraphModel dx="1100" dy="650" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="520" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=14;fontStyle=1;" value="Ручная геопривязка трассы (§ 4.2) — три опорные точки" vertex="1">
+          <mxGeometry x="120" y="15" width="660" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="track" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#43a047;strokeWidth=2;fontSize=11;align=center;" value="Локальная плоскость трассы (X — вдоль трассы, Z — поперёк)&#xa;bounds: origin_x, origin_z, size_x, size_z из track.json" vertex="1">
+          <mxGeometry x="80" y="70" width="740" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="origin" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#c62828;strokeWidth=2;fontSize=11;fontStyle=1;" value="origin&#xa;(0, 0) локально&#xa;→ lat₀, lon₀, alt₀" vertex="1">
+          <mxGeometry x="120" y="200" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="px" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=2;fontSize=11;fontStyle=1;" value="x&#xa;направление оси X&#xa;→ lat_x, lon_x" vertex="1">
+          <mxGeometry x="420" y="120" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pz" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff9c4;strokeColor=#f9a825;strokeWidth=2;fontSize=11;fontStyle=1;" value="z&#xa;направление оси Z&#xa;→ lat_z, lon_z" vertex="1">
+          <mxGeometry x="420" y="280" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="track-line" edge="1" parent="1" style="endArrow=none;html=1;strokeWidth=3;strokeColor=#2e7d32;rounded=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="250" y="235" as="sourcePoint" />
+            <mxPoint x="650" y="235" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e-ox" edge="1" parent="1" source="origin" target="px" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#1565c0;endFill=1;fontSize=10;" value="ось X, масштаб">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-oz" edge="1" parent="1" source="origin" target="pz" style="endArrow=classic;html=1;strokeWidth=2;strokeColor=#f9a825;endFill=1;fontSize=10;" value="ось Z, масштаб">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note" parent="1" style="shape=note;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#d6b656;align=left;spacing=8;fontSize=10;" value="Пользователь задаёт географические координаты трёх точек в GUI DCT.&lt;br&gt;Без корректных anchors преобразование не строится — MAVLink не отправляет координаты." vertex="1">
+          <mxGeometry x="80" y="370" width="740" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

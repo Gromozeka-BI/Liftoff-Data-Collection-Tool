@@ -1,0 +1,5 @@
+total_words_approx=12944
+total_paragraphs=1408
+ВВЕДЕНИЕ: paras=989 words~=9795 figures=38
+ЗАКЛЮЧЕНИЕ: paras=4 words~=110 figures=0
+СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ: paras=271 words~=2144 figures=5

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import QTimer, pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGroupBox,
     QHBoxLayout, QLabel, QPushButton, QSizePolicy,
@@ -11,7 +11,11 @@ from PyQt6.QtWidgets import (
 )
 
 from dct.gui import ui_settings
-from dct.gui.widgets.mavlink_panel import build_mavlink_panel, read_mavlink_settings
+from dct.gui.widgets.mavlink_panel import (
+    apply_mavlink_panel_layout,
+    build_mavlink_panel,
+    read_mavlink_settings,
+)
 from dct.localization import reference_builder as refbuild
 
 
@@ -227,12 +231,22 @@ class ReplayPage(QWidget):
             bounds_default="Bounds: no replay track selected",
             on_changed=self._on_mavlink_changed,
         )
-        root.addWidget(self._mavlink.box)
+        root.addWidget(self._mavlink.box, 0, Qt.AlignmentFlag.AlignTop)
+        apply_mavlink_panel_layout(self._mavlink)
 
         root.addStretch(1)
         self.reload_sessions()
 
     # ── public API ─────────────────────────────────────────────────────────
+
+    def refresh_layout(self) -> None:
+        """Re-apply Mavlink sizing after tab switch (same as Setup)."""
+        inner = max(160, self.width() - 16)
+        apply_mavlink_panel_layout(self._mavlink, inner)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.refresh_layout)
 
     def reload_sessions(self) -> None:
         base = Path(ui_settings.load().get("replay_dir", "sessions"))

@@ -1981,7 +1981,14 @@ def build_document() -> str:
             ]
         )
     )
-    body.append(placeholder("схема интеграции DCT -> MAVLink UDP -> NebosvodConnect -> Небосвод"))
+    body.append(
+        p(
+            "[Вставить рисунок: figures/integration_monitoring.drawio → PNG; "
+            "подпись: «Рисунок 4.X — Схема интеграции DCT с системой мониторинга БВС "
+            "(MAVLink UDP, Nebosvod Connect, «Небосвод»)»]",
+            italic=True,
+        )
+    )
 
     body.append(h2("4.2 Геопривязка локальной системы координат трассы"))
     body.append(
@@ -2026,7 +2033,13 @@ def build_document() -> str:
             ]
         )
     )
-    body.append(placeholder("схема ручной геопривязки трассы по точкам origin, x, z"))
+    body.append(
+        p(
+            "[Вставить рисунок: figures/geo_anchors.drawio → PNG; "
+            "подпись: «Рисунок 4.X — Ручная геопривязка трассы (точки origin, x, z)»]",
+            italic=True,
+        )
+    )
 
     body.append(h2("4.3 Преобразование локальных координат в глобальные"))
     body.append(
@@ -2068,6 +2081,13 @@ def build_document() -> str:
                 ["5", "преобразовать локальную точку DCT в ENU"],
                 ["6", "перевести ENU обратно в lat/lon/alt"],
             ]
+        )
+    )
+    body.append(
+        p(
+            "[Вставить рисунок: figures/geo_transform.drawio → PNG; "
+            "подпись: «Рисунок 4.X — Алгоритм преобразования локальных координат в WGS84»]",
+            italic=True,
         )
     )
 
@@ -2114,7 +2134,12 @@ def build_document() -> str:
             ]
         )
     )
-    body.append(placeholder("фрагмент схемы MAVLink-передачи и UDP-соединения"))
+    body.append(
+        p(
+            "Детализация UDP-потока и полей MAVLink приведена на рисунке интеграции "
+            "(§ 4.1) и в таблице ниже; отдельная схема udpout не требуется.",
+        )
+    )
 
     body.append(h2("4.5 Интеграция с NebosvodConnect"))
     body.append(

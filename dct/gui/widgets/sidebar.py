@@ -19,7 +19,7 @@ class Sidebar(QFrame):
     page_changed      = pyqtSignal(int)
     collapsed_changed = pyqtSignal(bool)
 
-    DEFAULT_WIDTH = 262
+    DEFAULT_WIDTH = 248
 
     def __init__(
         self,

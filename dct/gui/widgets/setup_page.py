@@ -23,9 +23,8 @@ from PyQt6.QtWidgets import (
 
 from dct.gui import theme, ui_settings
 from dct.gui.widgets.mavlink_panel import (
+    apply_mavlink_panel_layout,
     build_mavlink_panel,
-    finalize_mavlink_panel,
-    mavlink_panel_min_width,
     read_mavlink_settings,
 )
 from dct.localization import reference_builder as refbuild
@@ -39,8 +38,8 @@ _SRC_LIFTOFF = "liftoff"
 _SRC_RC      = "rc"
 _SRC_BOTH    = "both"
 
-# Space for vertical scrollbar so content does not sit under the bar.
-_SCROLLBAR_GUTTER = 20
+# Space for vertical scrollbar (viewport − form width ≈ bar width + pad).
+_SCROLLBAR_GUTTER = 4
 _SCROLL_BOTTOM_PAD = 24
 _SCROLL_TAIL_SPACER = 20
 _SIDEBAR_WIDTH_DIVISOR = 1.5
@@ -311,7 +310,7 @@ class SetupPage(QWidget):
         gutter = _SCROLLBAR_GUTTER
         if hasattr(self, "_scroll"):
             bar = self._scroll.verticalScrollBar()
-            gutter = max(gutter, int(bar.sizeHint().width()) + 8)
+            gutter = max(gutter, int(bar.sizeHint().width()) + 2)
         return form_w + gutter
 
     def reload_profiles(self) -> None:
@@ -734,46 +733,48 @@ class SetupPage(QWidget):
 
     # ── helpers ────────────────────────────────────────────────────────────
 
+    def _form_inner_width(self) -> int:
+        """Width available for group boxes (Session config, Mavlink, …)."""
+        return max(160, int(self._form_width) - 16)
+
     def _apply_form_width(self) -> None:
-        """Fit sidebar form; Mavlink grid keeps full width (Alt column must stay visible)."""
-        if hasattr(self, "_mavlink"):
-            finalize_mavlink_panel(self._mavlink)
-            self._mavlink.box.adjustSize()
+        """Fit sidebar form; Mavlink matches width of other group boxes."""
         self._form_content.adjustSize()
         natural_w = max(
             self._form_content.sizeHint().width(),
             self._form_content.minimumSizeHint().width(),
         )
-        content_margins = 12
-        mav_need = mavlink_panel_min_width() + content_margins
         scaled = max(
             _FORM_MIN_WIDTH,
             int(round(natural_w / _SIDEBAR_WIDTH_DIVISOR)),
-            mav_need,
         )
         self._form_width = scaled
         self._form_content.setFixedWidth(self._form_width)
+        if hasattr(self, "_mavlink"):
+            apply_mavlink_panel_layout(self._mavlink, self._form_inner_width())
         self._refresh_form_height()
 
     def _refresh_form_height(self) -> None:
         """Scroll content must be tall enough — Record was squeezing Mavlink vertically."""
         if hasattr(self, "_mavlink"):
-            finalize_mavlink_panel(self._mavlink)
+            apply_mavlink_panel_layout(self._mavlink, self._form_inner_width())
         lay = self._form_content.layout()
         if lay is not None:
             lay.activate()
         self._form_content.adjustSize()
+        hint_h = self._form_content.sizeHint().height()
+        min_h = self._form_content.minimumSizeHint().height()
         if lay is not None:
-            h = lay.minimumSize().height()
-        else:
-            h = max(
-                self._form_content.sizeHint().height(),
-                self._form_content.minimumSizeHint().height(),
+            hint_h = max(hint_h, lay.sizeHint().height(), lay.minimumSize().height())
+        if hasattr(self, "_mavlink"):
+            hint_h = max(
+                hint_h,
+                self._mavlink.box.sizeHint().height() + _SCROLL_TAIL_SPACER,
             )
-        total_h = h + _SCROLL_BOTTOM_PAD
-        self._form_content.setMinimumHeight(total_h)
-        # QScrollArea (widgetResizable=False) uses widget size(), not minimumHeight.
-        self._form_content.resize(self._form_width, total_h)
+        total_h = hint_h + _SCROLL_BOTTOM_PAD
+        # Fixed height: resize(..., too_small) was compressing anchor rows in Record.
+        self._form_content.setFixedWidth(self._form_width)
+        self._form_content.setFixedHeight(total_h)
         self._scroll.updateGeometry()
 
     def showEvent(self, event) -> None:

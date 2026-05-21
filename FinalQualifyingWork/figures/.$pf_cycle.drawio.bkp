@@ -1,0 +1,130 @@
+<mxfile host="app.diagrams.net" agent="Cursor" version="29.3.6" type="device">
+  <diagram id="pf-cycle" name="Particle Filter §3.4">
+    <mxGraphModel dx="1100" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="720" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#1a1a1a;" value="Цикл одного шага Particle Filter (DCT)&#xa;состояние частицы: (s, v) — позиция на дуге трассы, м; скорость, м/с" vertex="1">
+          <mxGeometry x="40" y="20" width="640" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="start" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="Начало шага&#xa;update(stick_norm, dt)" vertex="1">
+          <mxGeometry x="260" y="85" width="200" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="input" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" value="&lt;b&gt;Вход:&lt;/b&gt; нормализованный вектор RC stick_norm;&lt;br&gt;интервал dt с предыдущего шага (сек)" vertex="1">
+          <mxGeometry x="200" y="155" width="320" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d-init" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="Фильтр&#xa;инициализирован?" vertex="1">
+          <mxGeometry x="255" y="225" width="210" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reset" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" value="&lt;b&gt;reset()&lt;/b&gt;&lt;br&gt;частицы у старта и финиша круга;&lt;br&gt;равномерные веса w = 1/N" vertex="1">
+          <mxGeometry x="500" y="230" width="200" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d-dt" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="dt задан&#xa;и dt &amp;gt; 0?" vertex="1">
+          <mxGeometry x="255" y="340" width="210" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="predict" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;spacingTop=6;" value="&lt;b&gt;1. Predict (предсказание)&lt;/b&gt;&lt;br&gt;• v ← v + N(0, q_v·√dt), ограничение [v_min, v_max]&lt;br&gt;• s ← s + v·dt + N(0, q_s·√dt)&lt;br&gt;• s ← s mod L (циклический круг)" vertex="1">
+          <mxGeometry x="170" y="460" width="380" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="skip-predict" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;fontColor=#888888;align=center;" value="пропуск predict&#xa;(первый шаг)" vertex="1">
+          <mxGeometry x="500" y="365" width="110" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="weight" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;spacingTop=6;" value="&lt;b&gt;2. Weight update (обновление весов)&lt;/b&gt;&lt;br&gt;• ближайший узел референса по s (searchsorted)&lt;br&gt;• невязка d² по норм. RC-признакам (веса каналов)&lt;br&gt;• w_i ∝ exp(−0.5·d²/σ²_obs), нормализация Σw = 1" vertex="1">
+          <mxGeometry x="130" y="575" width="460" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="d-ess" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="ESS &amp;lt; ess_thr·N?&#xa;ESS = 1/Σw²" vertex="1">
+          <mxGeometry x="255" y="695" width="210" height="95" as="geometry" />
+        </mxCell>
+
+        <mxCell id="resample" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;spacingTop=6;" value="&lt;b&gt;3. Resampling (ресемплинг)&lt;/b&gt;&lt;br&gt;• систематический ресемплинг по w&lt;br&gt;• roughening: s += N(0, roughening_s)&lt;br&gt;• random inject: доля частиц → U(0, L) по s&lt;br&gt;• w ← 1/N" vertex="1">
+          <mxGeometry x="130" y="825" width="460" height="95" as="geometry" />
+        </mxCell>
+
+        <mxCell id="skip-resample" parent="1" style="text;html=1;strokeColor=none;fillColor=none;fontSize=10;fontColor=#888888;align=center;" value="ресемплинг&#xa;не нужен" vertex="1">
+          <mxGeometry x="500" y="720" width="100" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="estimate" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;spacingTop=6;" value="&lt;b&gt;4. Circular mean (оценка положения)&lt;/b&gt;&lt;br&gt;• θ = 2π·s/L; взвешенные cos θ, sin θ&lt;br&gt;• s_est — угол на окружности; σ — неопределённость" vertex="1">
+          <mxGeometry x="150" y="955" width="420" height="75" as="geometry" />
+        </mxCell>
+
+        <mxCell id="end" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" value="Выход: s_est, σ" vertex="1">
+          <mxGeometry x="270" y="1055" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cam-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#f9a825;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#444444;dashed=1;dashPattern=4 4;" value="&lt;b&gt;Камерное наблюдение&lt;/b&gt; (п. 3.5):&lt;br&gt;inject_position_observation(xyz, σ_cam) —&lt;br&gt;только шаги 2–4 (без predict),&lt;br&gt;random inject отключён" vertex="1">
+          <mxGeometry x="20" y="575" width="200" height="85" as="geometry" />
+        </mxCell>
+
+        <mxCell id="loop-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#9e9e9e;align=left;verticalAlign=top;spacing=8;fontSize=10;fontColor=#555555;" value="Модуль: dct.localization.online_localizer.ParticleFilter&lt;br&gt;Вызывается на каждом шаге OnlineLocalizer.update()" vertex="1">
+          <mxGeometry x="20" y="955" width="280" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- edges -->
+        <mxCell id="e1" edge="1" parent="1" source="start" target="input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="input" target="d-init" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="d-init" target="reset" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" value="нет">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="reset" target="d-dt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="320" />
+              <mxPoint x="600" y="385" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="d-init" target="d-dt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" value="да">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="d-dt" target="predict" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" value="да">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="d-dt" target="weight" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=1;entryY=0.25;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="385" />
+              <mxPoint x="620" y="598" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="predict" target="weight" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="weight" target="d-ess" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="d-ess" target="resample" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;" value="да">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="d-ess" target="estimate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;fontSize=10;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=1;entryY=0.3;" value="нет">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="742" />
+              <mxPoint x="620" y="978" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="resample" target="estimate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="estimate" target="end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;endArrow=block;endFill=1;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

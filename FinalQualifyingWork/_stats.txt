@@ -1,0 +1,7 @@
+﻿fig 3 tab 1
+fig nums 3 [6, 32, 46] ... [6, 32, 46]
+tab nums 1 [45]
+unref fig 2
+[6, 32]
+unref tab 1
+[45]

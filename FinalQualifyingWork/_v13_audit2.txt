@@ -1,0 +1,11 @@
+CAPTIONS: fig 3, tab 1
+REFS in text: fig 10 unique, tab 5 unique
+
+FIG NOT REFERENCED (1):
+32
+
+TAB NOT REFERENCED (1):
+45
+
+CAP 33/34 check:
+ch2 arch ref p452: ля конкретного полигона или трассы. Параметры преобразования — табл. 42; схема точек — рис. 41; пример экрана — рис. 42.

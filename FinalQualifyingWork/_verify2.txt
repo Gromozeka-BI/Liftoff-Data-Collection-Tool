@@ -1,0 +1,2 @@
+bad=[]
+['3.4 OK in body']

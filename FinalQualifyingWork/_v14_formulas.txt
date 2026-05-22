@@ -1,0 +1,8 @@
+184: ũ_k = (u_k − μ_k) / σ_k,  k = 1…K    (3.2)
+196: v_i ← clip(v_i + η_v, v_min, v_max);  s_i ← (s_i + v_i·Δt + η_s) mod L    (3.3)
+198: d_i² = Σ_k w_k·(f_ref,k(s_i) − ũ_k)²;  w_i ← w_i·exp(−d_i² / (2σ_obs²));  Σ_i w_i = 1    (3.4)
+200: ESS = 1 / Σ_i w_i²;  θ_i = 2π·s_i / L;  s_est = (L / 2π)·atan2(Σ_i w_i sin θ_i, Σ_i w_i cos θ_i)    (3.5)
+215: w_i ← w_i·exp(−‖p(s_i) − z_obs‖² / (2σ_cam²))    (3.6)
+223: e_t = ‖p_gt(t) − p_est(t)‖,  p90_err_m = Q_0,9({e_t}),  p95_err_m = Q_0,95({e_t})    (3.1)
+467: East = R·cos(φ_0)·Δλ,  North = R·Δφ,  Up = Δh;  x_ENU = b_x·x_loc + b_z·z_loc + r_origin    (4.1)
+483: для категории HEPU*k*: P(‖e‖_гор < порог_k) ≥ 0,95 (оценивается по p95_err_m)    (4.2)

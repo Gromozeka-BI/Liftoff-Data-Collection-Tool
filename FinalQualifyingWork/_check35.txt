@@ -1,0 +1,12 @@
+197: Таблица 11 – параметры Particle Filter и их назначение
+
+206: После получения детекций выполняется сопоставление с моделью ворот трассы и решение задачи PnP. В коде эта часть реализована через «YoloGateDetection», «YoloAdapterConfig» и «CoarseRefineLocalizer». На выходе формируется «CameraObservation»: позиция «xyz_obs» в локальной системе координат трассы, оценка неопределённости «sigma_cam», «confidence», «gate_id», ошибка репроекции, номер кадра, «bbox» и «keypoints» для последующей визуализации в Replay (Приложение Ж).
+
+207: Таблица 12 – параметры CameraObservation и их назначение
+
+709:   -> YoloGateDetection[]
+197: Таблица 11 – параметры Particle Filter и их назначение
+
+206: После получения детекций выполняется сопоставление с моделью ворот трассы и решение задачи PnP. В коде эта часть реализована через «YoloGateDetection», «YoloAdapterConfig» и «CoarseRefineLocalizer». На выходе формируется «CameraObservation»: позиция «xyz_obs» в локальной системе координат трассы, оценка неопределённости «sigma_cam», «confidence», «gate_id», ошибка репроекции, номер кадра, «bbox» и «keypoints» для последующей визуализации в Replay (Приложение Ж).
+
+709:   -> YoloGateDetection[]
